@@ -28,7 +28,7 @@ ptb_application = (
 # --- Fungsi Utility Bot ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Halo! Kirimkan file Excel (.xls atau .xlsx) untuk mendapatkan laporan harian terupdate."
+        "Halo! Kirimkan file Excel (.xls atau .xlsx) untuk mendapatkan laporan harian terintegrasi."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -43,7 +43,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Mohon unggah file dengan format .xls atau .xlsx.")
         return
 
-    await update.message.reply_text("Menerima file Anda, memproses laporan terintegrasi...")
+    await update.message.reply_text("Menerima file Anda, memproses laporan terintegrasi untuk tanggal terupdate...")
 
     try:
         file_id = document.file_id
@@ -59,7 +59,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         required_headers = ['SCORDERNO', 'STO', 'STATUSDATE', 'STATUS', 'ERRORCODE', 'SUBERRORCODE']
         missing_headers = [header for header in required_headers if header not in df.columns]
         if missing_headers:
-            await update.message.reply_text(f"File Excel lengkap. Header hilang: {', '.join(missing_headers)}")
+            await update.message.reply_text(f"File Excel tidak lengkap. Header hilang: {', '.join(missing_headers)}")
             return
             
         for col in ['STO', 'STATUS', 'ERRORCODE', 'SUBERRORCODE']:
@@ -78,7 +78,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         # Pembuatan & Pengiriman Laporan Tunggal
         image_buffer, summary_text = create_integrated_dashboard(daily_df, latest_date) 
-        caption = f"Dashboard & Ringkasan Laporan - {latest_date.strftime('%d %B %Y')}"
+        caption = f"Laporan Harian Dashboard Up To Date - {latest_date.strftime('%d %B %Y')}"
         await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
     except Exception as e:
@@ -129,7 +129,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
 
     # --- 3. Visualisasi dengan GridSpec ---
     num_rows = len(display_df)
-    fig_height = num_rows * 0.4 + 4.5 # Menambah ruang untuk header dan footer
+    fig_height = num_rows * 0.4 + 4.5
     
     fig = plt.figure(figsize=(12, fig_height))
     gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 4])
@@ -139,18 +139,24 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
     # Render Judul
-    ax_title.text(0.01, 0.8, "Laporan Harian (Terupdate)", ha='left', va='top', fontsize=18, weight='bold', color='#2F3E46')
+    ax_title.text(0.01, 0.8, "Laporan Harian Dashboard Up To Date", ha='left', va='top', fontsize=18, weight='bold', color='#2F3E46')
     ax_title.text(0.01, 0.3, report_date.strftime('%d %B %Y').upper(), ha='left', va='top', fontsize=12, color='#588157')
     
     # Render Tabel
-    table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], loc='center', cellLoc='center')
+    table = ax_table.table(cellText=[['']*len(display_df.columns)]*len(display_df), colLabels=['KATEGORI'] + stos + ['Grand Total'], loc='center', cellLoc='center')
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 1.8)
 
     # Styling Tabel
     color_map = {
-        'COMPWORK': ('#4CAF50', 'white'), 'ACOMP': ('#C8E6C9', 'black'), 'VALCOMP': ('#C8E6C9', 'black'), 'VALSTART': ('#C8E6C9', 'black'),
-        'WORKFAIL': ('#FF9800', 'white'), 'KENDALA_ERROR': ('#FFE0B2', 'black'), 'STARTWORK': ('#FFFDE7', 'black'),
-        'CANCLWORK': ('#F44336', 'white'), 'Total': ('#F5F5F5', 'black')
+        'COMPWORK': ('#556B2F', 'white'), # Moss Green
+        'ACOMP': ('#90EE90', 'black'), # Leaf Green
+        'VALCOMP': ('#90EE90', 'black'), # Leaf Green
+        'VALSTART': ('#90EE90', 'black'), # Leaf Green
+        'WORKFAIL': ('#FF8C00', 'white'), # Dark Orange
+        'KENDALA_ERROR': ('#FFDAB9', 'black'), # Light Orange
+        'STARTWORK': ('#FFFACD', 'black'), # Yellow (LemonChiffon)
+        'CANCLWORK': ('#DC143C', 'white'), # Red (Crimson)
+        'Total': ('#F5F5F5', 'black')
     }
     
     for (row_idx, col_idx), cell in table.get_celld().items():
@@ -194,6 +200,7 @@ def create_summary_text(daily_df: pd.DataFrame) -> str:
     def get_count(s): return status_counts.get(s, 0)
 
     ps = get_count('COMPWORK')
+    # ACTCOMP tidak ada di daftar status, maka diabaikan atau diganti. Saya asumsikan ACOMP.
     acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
     pi = get_count('STARTWORK')
     pi_progress = get_count('INTSCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
@@ -212,10 +219,9 @@ def create_summary_text(daily_df: pd.DataFrame) -> str:
     )
 
 def create_empty_dashboard(report_date: datetime.date) -> (io.BytesIO, str):
-    # (Fungsi ini tetap sama, hanya return tuple)
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
-    fig.suptitle(f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
+    fig.suptitle(f"Laporan Harian Dashboard Up To Date - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
     ax.text(0.5, 0.5, "Tidak ada data untuk status yang relevan pada tanggal ini.", ha='center', va='center', fontsize=12, wrap=True)
     plt.tight_layout(rect=[0, 0, 1, 0.9])
     image_buffer = io.BytesIO()
