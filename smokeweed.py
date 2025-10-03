@@ -74,7 +74,6 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         latest_date = df['STATUSDATE'].dt.date.max()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date].copy()
         
-        # Hitung status counts sekali untuk konsistensi
         status_counts = daily_df['STATUS'].value_counts()
         
         image_buffer = create_integrated_dashboard(daily_df, latest_date, status_counts) 
@@ -86,59 +85,54 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (LOGIKA AKURASI BARU) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN SKEMA WARNA BARU) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
+    # PERBAIKAN: Urutan status diperbarui sesuai permintaan
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
     
-    # PERBAIKAN: Loop melalui semua status yang ditentukan
     for status in status_order:
         status_df = daily_df[daily_df['STATUS'] == status]
         
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
-        # Hanya tampilkan baris jika Grand Total-nya > 0
-        if sum(list(row_data.values())[1:]) > 0:
+        if sum(list(row_data.values())[1:]) > 0 or status == 'WORKFAIL':
             table_data.append(row_data)
             row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
-        if status == 'WORKFAIL':
-            # Jika WORKFAIL > 0, tampilkan turunannya
-            if not status_df.empty:
-                for error_code, error_group in status_df.groupby('ERRORCODE'):
-                    if error_code in ['NAN', 'N/A']: continue
-                    error_row = {'KATEGORI': f"  ↳ {error_code}"}
-                    for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
-                    table_data.append(error_row)
-                    row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
+        if status == 'WORKFAIL' and not status_df.empty:
+            for error_code, error_group in status_df.groupby('ERRORCODE'):
+                if error_code in ['NAN', 'N/A']: continue
+                error_row = {'KATEGORI': f"  ↳ {error_code}"}
+                for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
+                table_data.append(error_row)
+                row_styles[len(table_data) - 1] = {'level': 2, 'status': status, 'error': error_code}
 
-                    for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
-                        if sub_error_code in ['NAN', 'N/A']: continue
-                        sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
-                        for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
-                        if sum(list(sub_error_row.values())[1:]) > 0:
-                            table_data.append(sub_error_row)
-                            row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
+                for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
+                    if sub_error_code in ['NAN', 'N/A']: continue
+                    sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
+                    for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
+                    if sum(list(sub_error_row.values())[1:]) > 0:
+                        table_data.append(sub_error_row)
+                        row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
     if not table_data: return create_empty_dashboard(report_date)
 
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
-    # PERBAIKAN: Hitung Grand Total dari data sumber yang relevan
+    # Hitung Grand Total dari sumber yang akurat
     relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles[table_data.index(row)]['level'] == 1]
     total_source_df = daily_df[daily_df['STATUS'].isin(relevant_statuses)]
-    
     grand_total_row = {'KATEGORI': 'Grand Total'}
-    for sto in stos:
-        grand_total_row[sto] = len(total_source_df[total_source_df['STO'] == sto])
+    for sto in stos: grand_total_row[sto] = len(total_source_df[total_source_df['STO'] == sto])
     grand_total_row['Grand Total'] = len(total_source_df)
-
+    
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
@@ -165,15 +159,34 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
                            loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    color_map = {'COMPWORK': '#F0FFF0', 'WORKFAIL': '#FFFFE0', 'Total': '#F5F5F5'}
+    # PERBAIKAN: Skema warna baru
+    color_map = {
+        'COMPWORK': ('#556B2F', 'white'), # Moss Green
+        'ACOMP': ('#9ACD32', 'black'),   # Leaf Green
+        'VALCOMP': ('#9ACD32', 'black'),  # Leaf Green
+        'VALSTART': ('#9ACD32', 'black'),# Leaf Green
+        'WORKFAIL': ('#FF8C00', 'white'), # Dark Orange
+        'KENDALA_ERROR': ('#FFDAB9', 'black'), # Light Orange
+        'STARTWORK': ('#FFFACD', 'black'),  # Yellow
+        'CANCLWORK': ('#DC143C', 'white'), # Red
+        'Total': ('#F5F5F5', 'black')
+    }
+    
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor('#D3D3D3'); cell.set_linewidth(0.8)
         if row_idx == 0:
             cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold')
             continue
+        
         style = row_styles.get(row_idx - 1, {}); data_row = display_df.iloc[row_idx - 1]
-        bg_color = color_map.get(style.get('status'), 'white')
-        cell.set_facecolor(bg_color)
+        
+        bg_color, text_color = 'white', 'black'
+        status_key = style.get('status')
+        if style.get('level') == 2 and status_key == 'WORKFAIL': status_key = 'KENDALA_ERROR'
+        if status_key in color_map: bg_color, text_color = color_map[status_key]
+        
+        cell.set_facecolor(bg_color); cell.get_text().set_color(text_color)
+
         if col_idx > 0:
             numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
             cell.get_text().set_text(f"{numeric_value:,.0f}" if pd.notna(numeric_value) and numeric_value > 0 else "")
@@ -181,6 +194,8 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
         else:
             cell.get_text().set_text(data_row.iloc[col_idx])
             cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
+        
+        if style.get('level') == 3: cell.get_text().set_style('italic')
     
     ax_text.text(0.05, 0.9, summary_text, ha='left', va='top', fontsize=10, family='monospace')
     
@@ -190,6 +205,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     return image_buffer
 
 def create_summary_text(status_counts: pd.Series) -> str:
+    # (Fungsi ini tidak berubah)
     def get_count(s): return status_counts.get(s, 0)
     
     ps = get_count('COMPWORK')
@@ -211,6 +227,7 @@ def create_summary_text(status_counts: pd.Series) -> str:
     )
 
 def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
+    # (Fungsi ini tidak berubah)
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
     report_time = datetime.now().strftime('%H:%M:%S')
@@ -248,4 +265,4 @@ async def telegram_webhook(request: Request):
         json_data = await request.json(); update = Update.de_json(json_data, ptb_application.bot)
         await ptb_application.process_update(update); return Response(status_code=200)
     except Exception as e:
-        logger.error(f"Error processing webhook update: {e}", exc_info=True); return Response(status_code=500)
+        logger.error(f"Error processing file: {e}", exc_info=True); return Response(status_code=500)
