@@ -55,7 +55,6 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         df = pd.read_excel(file_buffer)
 
-        # Persiapan & Validasi Data
         required_headers = ['SCORDERNO', 'STO', 'STATUSDATE', 'STATUS', 'ERRORCODE', 'SUBERRORCODE']
         missing_headers = [header for header in required_headers if header not in df.columns]
         if missing_headers:
@@ -72,13 +71,11 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("Tidak ditemukan data dengan tanggal valid di kolom STATUSDATE.")
             return
             
-        # Logika Inti: Fokus pada Tanggal Terupdate
         latest_date = df['STATUSDATE'].dt.date.max()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date].copy()
         
-        # Pembuatan & Pengiriman Laporan Tunggal
         image_buffer = create_integrated_dashboard(daily_df, latest_date) 
-        caption = f"Laporan Harian Dashboard Up To Date - {latest_date.strftime('%d %B %Y %H:%M:%S')}"
+        caption = f"Laporan Harian (Terupdate) - {latest_date.strftime('%d %B %Y')}"
         await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
     except Exception as e:
@@ -86,11 +83,12 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD TERINTEGRASI ---
+# --- FUNGSI PEMBUATAN DASHBOARD (GAYA BARU SESUAI GAMBAR) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
+    # Urutan bisa disesuaikan jika perlu
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
@@ -106,7 +104,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
             for error_code, error_group in status_df.groupby('ERRORCODE'):
                 if error_code in ['NAN', 'N/A']: continue
                 error_row = {'KATEGORI': f"  ↳ {error_code}"}; [error_row.update({sto: len(error_group[error_group['STO'] == sto])}) for sto in stos]
-                table_data.append(error_row); row_styles[len(table_data) - 1] = {'level': 2, 'status': status, 'error': error_code}
+                table_data.append(error_row); row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
 
                 for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
                     if sub_error_code in ['NAN', 'N/A']: continue
@@ -122,108 +120,69 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # --- 2. Perhitungan Teks Ringkasan ---
-    summary_text = create_summary_text(daily_df)
-
-    # --- 3. Visualisasi dengan GridSpec ---
+    # --- 2. Visualisasi ---
     num_rows = len(display_df)
-    fig_height = num_rows * 0.4 + 5 # Menambah ruang untuk header dan footer
+    fig_height = num_rows * 0.5 + 2 # Menambah tinggi per baris
     
-    fig = plt.figure(figsize=(12, fig_height))
-    gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 4.5])
+    fig, ax = plt.subplots(figsize=(10, fig_height))
+    ax.axis('off')
     
-    ax_title = fig.add_subplot(gs[0]); ax_title.axis('off')
-    ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
-    ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
+    # Judul
+    report_time = datetime.now().strftime('%H:%M:%S')
+    fig.text(0.05, 0.95, f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
+             ha='left', va='center', fontsize=16, weight='bold', color='#2F3E46')
     
-    # Render Judul
-    report_time = datetime.now().strftime('%H:%M')
-    ax_title.text(0.01, 0.8, "Laporan Harian Dashboard Up To Date", ha='left', va='top', fontsize=18, weight='bold', color='#2F3E46')
-    ax_title.text(0.01, 0.3, f"{report_date.strftime('%d %B %Y "%H:%M:%S').upper()} - {report_time}", ha='left', va='top', fontsize=12, color='#588157')
-    
-    # Render Tabel
-    table = ax_table.table(cellText=[['']*len(display_df.columns)]*len(display_df), colLabels=['KATEGORI'] + stos + ['Grand Total'], loc='center', cellLoc='center')
-    table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 1.8)
+    # Tabel
+    table = ax.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
+                     loc='center', cellLoc='center')
+    table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # Styling Tabel
+    # Styling
     color_map = {
-        'COMPWORK': ('#556B2F', 'Moss Green'), # Moss Green
-        'ACOMP': ('#9ACD32', 'Leaf Green'), # Leaf Green (YellowGreen for better readability)
-        'VALCOMP': ('#9ACD32', 'Leaf Green'), # Leaf Green
-        'VALSTART': ('#9ACD32', 'Leaf Green'), # Leaf Green
-        'WORKFAIL': ('#FF8C00', 'Dark Orange'), # Dark Orange
-        'KENDALA_ERROR': ('#FFDAB9', 'Light Orange'), # Light Orange
-        'STARTWORK': ('#FFFACD', 'Yellow'), # Yellow (LemonChiffon)
-        'CANCLWORK': ('#DC143C', 'Red'), # Red (Crimson)
-        'Total': ('#F5F5F5', 'black')
+        'COMPWORK': '#F0FFF0', # Hijau pucat
+        'WORKFAIL': '#FFFFE0', # Kuning pucat
+        'Total': '#F5F5F5'  # Abu-abu sangat muda
     }
-    
-    for (row_idx, col_idx), cell in table.get_celld().items():
-        cell.set_linewidth(0)
-        if row_idx == 0:
-            cell.set_facecolor('#2F3E46'); cell.set_text_props(color='white', weight='bold'); cell.visible_edges = 'B'; cell.set_edgecolor('white'); cell.set_linewidth(1.5)
-            continue
-        cell.visible_edges = 'T'; cell.set_edgecolor('#E0E0E0'); cell.set_linewidth(0.8)
-        
-        style = row_styles.get(row_idx - 1, {})
-        data_row = display_df.iloc[row_idx - 1]
-        
-        bg_color, text_color = 'white', 'black'
-        status_key = style.get('status')
-        if style.get('level') == 2 and status_key == 'WORKFAIL': status_key = 'KENDALA_ERROR'
-        if status_key in color_map: bg_color, text_color = color_map[status_key]
-        
-        cell.set_facecolor(bg_color); cell.get_text().set_color(text_color)
 
-        if col_idx > 0:
+    for (row_idx, col_idx), cell in table.get_celld().items():
+        cell.set_edgecolor('#D3D3D3') # Garis abu-abu muda
+        cell.set_linewidth(0.8)
+
+        # Header
+        if row_idx == 0:
+            cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold')
+            continue
+
+        style = row_styles.get(row_idx - 1, {})
+        data_row = display_df.iloc[row_idx-1]
+        
+        # Pewarnaan Baris
+        bg_color = 'white'
+        status = style.get('status')
+        if status in color_map: bg_color = color_map[status]
+        cell.set_facecolor(bg_color)
+        
+        # Teks & Data
+        if col_idx > 0: # Kolom numerik
             numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
             cell.get_text().set_text(f"{numeric_value:,.0f}" if pd.notna(numeric_value) and numeric_value > 0 else "")
-            cell.set_text_props(ha='center', va='center')
-        else:
+            cell.set_text_props(ha='center', va='center', weight='bold')
+        else: # Kolom Kategori
             cell.get_text().set_text(data_row.iloc[col_idx])
-            cell.set_text_props(ha='left', va='center'); cell.PAD = 0.05
-        
-        if style.get('level') in [0, 1, 2]: cell.get_text().set_weight('bold')
-        if style.get('level') == 3: cell.get_text().set_style('italic')
-        
-    # Render Teks Ringkasan di Footer
-    ax_text.text(0.01, 0.9, summary_text, ha='left', va='top', fontsize=10, family='monospace')
-
+            cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
+    
     plt.tight_layout()
     image_buffer = io.BytesIO()
-    plt.savefig(image_buffer, format='png', dpi=250); image_buffer.seek(0); plt.close(fig)
+    plt.savefig(image_buffer, format='png', dpi=200); image_buffer.seek(0); plt.close(fig)
     return image_buffer
-
-def create_summary_text(daily_df: pd.DataFrame) -> str:
-    status_counts = daily_df['STATUS'].value_counts()
-    def get_count(s): return status_counts.get(s, 0)
-
-    ps = get_count('COMPWORK')
-    # ACTCOMP tidak ada di daftar status, maka diabaikan. Saya gunakan ACOMP.
-    acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
-    pi = get_count('STARTWORK')
-    pi_progress = get_count('INTSCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
-    kendala = get_count('WORKFAIL')
-    est_ps = ps + acom
-
-    return (
-        f"Ringkasan Metrik Harian:\n"
-        f"--------------------------------------\n"
-        f"PS (COMPWORK)                 = {ps}\n"
-        f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
-        f"PI (STARTWORK)                  = {pi}\n"
-        f"PI PROGRESS (INSTCOMP+...)      = {pi_progress}\n"
-        f"KENDALA (WORKFAIL)              = {kendala}\n"
-        f"EST PS (PS+ACOM)                = {est_ps}"
-    )
 
 def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
-    report_time = datetime.now().strftime('%H:%M')
-    fig.suptitle(f"Laporan Harian Dashboard Up To Date - {report_date.strftime('%d %B %Y').upper()} - {report_time}", fontsize=16, weight='bold')
+    report_time = datetime.now().strftime('%H:%M:%S')
+    fig.suptitle(f"Laporan Harian (Terupdate) - {report_date.strftime('%d %B %Y').upper()} {report_time}", fontsize=16, weight='bold')
     ax.text(0.5, 0.5, "Tidak ada data untuk status yang relevan pada tanggal ini.", ha='center', va='center', fontsize=12, wrap=True)
-    plt.tight_layout(rect=[0, 0, 1, 0.9])
+    plt.tight_layout()
     image_buffer = io.BytesIO()
     plt.savefig(image_buffer, format='png', dpi=150); image_buffer.seek(0); plt.close(fig)
     return image_buffer
