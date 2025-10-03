@@ -77,7 +77,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         status_counts = daily_df['STATUS'].value_counts()
         
         image_buffer = create_integrated_dashboard(daily_df, latest_date, status_counts) 
-        caption = f"REPORT DAILY ENSTADE JAKPUS) - {latest_date.strftime('%d %B %Y')}"
+        caption = f"REPORT DAILY ENDSTATE JAKPUS - {latest_date.strftime('%d %B %Y')}"
         await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
     except Exception as e:
@@ -85,7 +85,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN PEWARNAAN BARU) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN JUDUL & LOGIKA STATUS BARU) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
@@ -94,17 +94,23 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     
     table_data, row_styles = [], {}
     
+    # PERBAIKAN: Logika untuk memastikan semua status yang ada di data muncul
+    unique_statuses_in_data = daily_df['STATUS'].unique()
+    
     for status in status_order:
+        # Hanya proses status jika ada di dalam data harian
+        if status not in unique_statuses_in_data:
+            continue
+            
         status_df = daily_df[daily_df['STATUS'] == status]
         
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
-        if sum(list(row_data.values())[1:]) > 0 or status == 'WORKFAIL':
-            table_data.append(row_data)
-            row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
+        table_data.append(row_data)
+        row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
-        if status == 'WORKFAIL' and not status_df.empty:
+        if status == 'WORKFAIL':
             for error_code, error_group in status_df.groupby('ERRORCODE'):
                 if error_code in ['NAN', 'N/A']: continue
                 error_row = {'KATEGORI': f"  ↳ {error_code}"}
@@ -125,7 +131,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
-    relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles[table_data.index(row)]['level'] == 1]
+    relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles.get(table_data.index(row), {}).get('level') == 1]
     total_source_df = daily_df[daily_df['STATUS'].isin(relevant_statuses)]
     grand_total_row = {'KATEGORI': 'Grand Total'}
     for sto in stos: grand_total_row[sto] = len(total_source_df[total_source_df['STO'] == sto])
@@ -149,7 +155,8 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
     report_time = datetime.now().strftime('%H:%M:%S')
-    ax_title.text(0.05, 0.95, f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
+    # PERBAIKAN: Judul diubah
+    ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
     col_widths = [0.35] + [0.08] * (len(stos) + 1)
@@ -157,17 +164,10 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
                            loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # PERBAIKAN: Skema warna baru yang spesifik
     color_map = {
-        'COMPWORK': ('#556B2F', 'white'), # Moss Green
-        'ACOMP': ('#9ACD32', 'black'),   # Leaf Green
-        'VALCOMP': ('#9ACD32', 'black'),  # Leaf Green
-        'VALSTART': ('#9ACD32', 'black'),# Leaf Green
-        'WORKFAIL': ('#FF8C00', 'white'), # Dark Orange
-        'KENDALA_ERROR': ('#FFDAB9', 'black'), # Light Orange
-        'STARTWORK': ('#FFFACD', 'black'),  # Yellow
-        'CANCLWORK': ('#DC143C', 'white'), # Red
-        'Total': ('#F5F5F5', 'black')
+        'COMPWORK': ('#556B2F', 'white'), 'ACOMP': ('#9ACD32', 'black'), 'VALCOMP': ('#9ACD32', 'black'), 
+        'VALSTART': ('#9ACD32', 'black'), 'WORKFAIL': ('#FF8C00', 'white'), 'KENDALA_ERROR': ('#FFDAB9', 'black'), 
+        'STARTWORK': ('#FFFACD', 'black'), 'CANCLWORK': ('#DC143C', 'white'), 'Total': ('#F5F5F5', 'black')
     }
     
     for (row_idx, col_idx), cell in table.get_celld().items():
@@ -203,7 +203,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     return image_buffer
 
 def create_summary_text(status_counts: pd.Series) -> str:
-    # (Fungsi ini tidak berubah)
     def get_count(s): return status_counts.get(s, 0)
     
     ps = get_count('COMPWORK')
@@ -225,11 +224,11 @@ def create_summary_text(status_counts: pd.Series) -> str:
     )
 
 def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
-    # (Fungsi ini tidak berubah)
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
     report_time = datetime.now().strftime('%H:%M:%S')
-    fig.suptitle(f"Laporan Harian (Terupdate) - {report_date.strftime('%d %B %Y').upper()} {report_time}", fontsize=16, weight='bold')
+    # PERBAIKAN: Judul diubah
+    fig.suptitle(f"REPORT DAILY ENDSTATE JAKPUS - {report_date.strftime('%d %B %Y').upper()} {report_time}", fontsize=16, weight='bold')
     ax.text(0.5, 0.5, "Tidak ada data untuk status yang relevan pada tanggal ini.", ha='center', va='center', fontsize=12, wrap=True)
     plt.tight_layout()
     image_buffer = io.BytesIO()
