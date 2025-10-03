@@ -83,7 +83,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN PERBAIKAN FINAL) ---
+# --- FUNGSI PEMBUATAN DASHBOARD TERINTEGRASI (DENGAN FREETEXT) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
@@ -127,65 +127,79 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # --- 2. Visualisasi ---
+    # --- 2. Perhitungan Teks Ringkasan ---
+    summary_text = create_summary_text(daily_df)
+
+    # --- 3. Visualisasi dengan GridSpec ---
     num_rows = len(display_df)
-    fig_height = num_rows * 0.5 + 1.5
+    fig_height = num_rows * 0.5 + 5 # Menambah ruang untuk footer
     
-    fig, ax = plt.subplots(figsize=(12, fig_height))
-    ax.axis('off')
+    fig = plt.figure(figsize=(12, fig_height))
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 4]) # Menambah height ratio footer
     
-    # Judul
+    ax_title = fig.add_subplot(gs[0]); ax_title.axis('off')
+    ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
+    ax_text = fig.add_subplot(gs[2]); ax_text.axis('off') # Area untuk teks ringkasan
+    
+    # Render Judul
     report_time = datetime.now().strftime('%H:%M:%S')
-    fig.text(0.05, 0.95, f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
-             ha='left', va='center', fontsize=16, weight='bold', color='#2F3E46')
+    ax_title.text(0.05, 0.95, f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
+                  ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
-    # --- PERBAIKAN: Definisikan lebar kolom sebelum membuat tabel ---
-    num_sto_cols = len(stos) + 1 # STOs + Grand Total
-    col_widths = [0.35] + [0.08] * num_sto_cols # [lebar_kategori, lebar_sto, lebar_sto, ...]
-    
-    # Tabel dengan colWidths
-    table = ax.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
-                     loc='center', cellLoc='center', colWidths=col_widths)
+    # Render Tabel
+    col_widths = [0.35] + [0.08] * (len(stos) + 1)
+    table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
+                           loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # Styling
-    color_map = {
-        'COMPWORK': '#F0FFF0',
-        'WORKFAIL': '#FFFFE0',
-        'Total': '#F5F5F5'
-    }
-
+    # Styling Tabel
+    color_map = {'COMPWORK': '#F0FFF0', 'WORKFAIL': '#FFFFE0', 'Total': '#F5F5F5'}
     for (row_idx, col_idx), cell in table.get_celld().items():
-        cell.set_edgecolor('#D3D3D3')
-        cell.set_linewidth(0.8)
-
-        # Header
+        cell.set_edgecolor('#D3D3D3'); cell.set_linewidth(0.8)
         if row_idx == 0:
             cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold')
             continue
-
-        style = row_styles.get(row_idx - 1, {})
-        data_row = display_df.iloc[row_idx - 1]
-        
-        # Pewarnaan Baris
-        bg_color = 'white'
-        status_key = style.get('status')
-        if status_key in color_map: bg_color = color_map[status_key]
+        style = row_styles.get(row_idx - 1, {}); data_row = display_df.iloc[row_idx - 1]
+        bg_color = color_map.get(style.get('status'), 'white')
         cell.set_facecolor(bg_color)
-        
-        # Teks & Data
-        if col_idx > 0: # Kolom numerik
+        if col_idx > 0:
             numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
             cell.get_text().set_text(f"{numeric_value:,.0f}" if pd.notna(numeric_value) and numeric_value > 0 else "")
             cell.set_text_props(ha='center', va='center', weight='bold')
-        else: # Kolom Kategori
+        else:
             cell.get_text().set_text(data_row.iloc[col_idx])
             cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
-        
+    
+    # Render Teks Ringkasan di Footer
+    ax_text.text(0.05, 0.9, summary_text, ha='left', va='top', fontsize=10, family='monospace')
+    
     plt.tight_layout()
     image_buffer = io.BytesIO()
     plt.savefig(image_buffer, format='png', dpi=200); image_buffer.seek(0); plt.close(fig)
     return image_buffer
+
+def create_summary_text(daily_df: pd.DataFrame) -> str:
+    # (Fungsi ini tidak berubah)
+    status_counts = daily_df['STATUS'].value_counts()
+    def get_count(s): return status_counts.get(s, 0)
+    
+    ps = get_count('COMPWORK')
+    acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP') # Asumsi ACTCOMP diganti ACOMP
+    pi = get_count('STARTWORK')
+    pi_progress = get_count('INTSCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
+    kendala = get_count('WORKFAIL')
+    est_ps = ps + acom
+
+    return (
+        f"Ringkasan Metrik Harian:\n"
+        f"--------------------------------------\n"
+        f"PS (COMPWORK)                 = {ps}\n"
+        f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
+        f"PI (STARTWORK)                  = {pi}\n"
+        f"PI PROGRESS (INSTCOMP+...)      = {pi_progress}\n"
+        f"KENDALA (WORKFAIL)              = {kendala}\n"
+        f"EST PS (PS+ACOM)                = {est_ps}"
+    )
 
 def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
     # (Fungsi ini tidak berubah)
