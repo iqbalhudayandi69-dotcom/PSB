@@ -1,13 +1,14 @@
 import logging
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
-from telegram import Update, Bot, InputFile
+from telegram import Update, InputFile
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
 import io
 import os
 from fastapi import FastAPI, Request, Response
-from contextlib import asynccontextmanager # Import ini
+from contextlib import asynccontextmanager
+from datetime import datetime
+import numpy as np
 
 # Konfigurasi Logging
 logging.basicConfig(
@@ -18,14 +19,14 @@ logger = logging.getLogger(__name__)
 # --- Konfigurasi Bot ---
 BOT_TOKEN = "8330450329:AAGEPd2j2a1dZ1PEJ7BrneykiZ-3Kv1T3LI"
 WEBHOOK_URL = "https://psbiqbal.onrender.com"
-WEBHOOK_PATH = "/telegram" # Path di mana FastAPI akan menerima update
+WEBHOOK_PATH = "/telegram" 
 
-# Inisialisasi Application (python-telegram-bot)
+# Inisialisasi Application
 ptb_application = (
     Application.builder().token(BOT_TOKEN).arbitrary_callback_data(True).build()
 )
 
-# --- Fungsi Utility Bot (Tidak berubah) ---
+# --- Fungsi Utility Bot ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Halo! Kirimkan file Excel (.xls atau .xlsx) Anda, dan saya akan membuatkan dashboard."
@@ -59,7 +60,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         df = pd.read_excel(file_buffer)
 
         required_headers = ['SCORDERNO', 'DATEL LAMA', 'STO', 'DATECREATED', 'STATUSDATE', 
-                            'STATUS', 'ERRORCODE', 'SUBERRORCODE', 'TGL_MANJA']
+                            'STATUS', 'ERRORCODE', 'SUBERRORCODE', 'TGL_MANJA', 'WORKFAIL']
         
         missing_headers = [header for header in required_headers if header not in df.columns]
         if missing_headers:
@@ -68,10 +69,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
 
-        df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
-        df.dropna(subset=['STATUSDATE'], inplace=True)
-
-        image_buffer = create_dashboard(df)
+        image_buffer = create_dashboard(df) 
         
         await update.message.reply_photo(photo=InputFile(image_buffer, filename="dashboard.png"))
         await update.message.reply_text("Dashboard Anda siap!")
@@ -80,97 +78,183 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.error(f"Error processing file: {e}", exc_info=True)
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
+
+# --- FUNGSI create_dashboard BARU UNTUK FORMAT GAMBAR SPESIFIK ---
 def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
-    target_statuses = ['ACOMP', 'STARTWORK', 'INTSCOMP', 'WORKFAIL', 
-                       'VALCOMP', 'VALSTART', 'CANCELWORK', 'COMPWORK']
-
-    df_filtered = df[df['STATUS'].isin(target_statuses)].copy()
-    df_filtered['STATUS_DATE_ONLY'] = df_filtered['STATUSDATE'].dt.date
-    status_counts = df_filtered.groupby(['STATUS_DATE_ONLY', 'STATUS']).size().reset_index(name='Jumlah SCORDERNO')
-
-    pivot_table = status_counts.pivot_table(index='STATUS_DATE_ONLY', columns='STATUS', values='Jumlah SCORDERNO').fillna(0)
+    """
+    Membuat dashboard visual yang meniru format gambar yang diberikan.
+    """
     
-    for status in target_statuses:
-        if status not in pivot_table.columns:
-            pivot_table[status] = 0
+    # --- 1. Persiapan Data ---
+    for col in ['STO', 'STATUS', 'ERRORCODE']:
+        if col not in df.columns: df[col] = 'N/A'
+        df[col] = df[col].fillna('N/A').astype(str)
 
-    pivot_table = pivot_table[target_statuses]
-
-    fig_height = 4 * len(target_statuses)
-    fig, axes = plt.subplots(nrows=len(target_statuses), ncols=1, figsize=(15, fig_height), sharex=True)
-    fig.suptitle('Dashboard SCORDERNO Status Tren Harian', fontsize=16)
-
-    if len(target_statuses) == 1:
-        axes = [axes]
-
-    for i, status in enumerate(target_statuses):
-        if not pivot_table[status].empty:
-            sns.lineplot(data=pivot_table, x=pivot_table.index, y=status, ax=axes[i], marker='o')
-        else:
-            axes[i].text(0.5, 0.5, 'Tidak ada data untuk status ini', horizontalalignment='center', verticalalignment='center', transform=axes[i].transAxes)
+    # Dapatkan daftar STO unik dari data, diurutkan
+    stos = sorted(df['STO'].unique())
+    
+    # Definisikan struktur hierarki KET_ORDER
+    ket_order_structure = {
+        'CANCLWORK': [], 'COMPWORK': [], 'INSTCOMP': [], 'STARTWORK': [],
+        'WORKFAIL': {
+            'KENDALA PELANGGAN': [
+                "ALAMAT TIDAK DITEMUKAN", "BATAL", "INDIKASI CABUT PASANG",
+                "KENDALA IZIN", "PENDING", "SALAH TAGGING",
+            ],
+            'KENDALA TEKNIK': [
+                "KENDALA IKR/IKG", "ODP JAUH", "ODP RETI"
+            ]
+        }
+    }
+    
+    # --- 2. Bangun DataFrame untuk Ditampilkan ---
+    table_data = []
+    row_styles = {} # Untuk menyimpan info styling
+    
+    for ket, sub_ket in ket_order_structure.items():
+        # Baris level 1 (STATUS)
+        row_data = {'KET_ORDER': ket}
         
-        axes[i].set_title(f'Jumlah SCORDERNO untuk STATUS: {status}')
-        axes[i].set_ylabel('Jumlah SCORDERNO')
-        axes[i].grid(True, linestyle='--', alpha=0.7)
-        axes[i].tick_params(axis='x', rotation=45)
-    
-    plt.xlabel('Tanggal')
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if not sub_ket: # Jika tidak punya sub-kategori
+            filtered_df = df[df['STATUS'] == ket]
+            for sto in stos:
+                row_data[sto] = len(filtered_df[filtered_df['STO'] == sto])
+            table_data.append(row_data)
+            row_styles[len(table_data)-1] = {'level': 1, 'color': ket}
+        else: # Jika punya sub-kategori (kasus WORKFAIL)
+            # Baris header grup
+            workfail_df = df[df['STATUS'] == ket]
+            for sto in stos:
+                row_data[sto] = len(workfail_df[workfail_df['STO'] == sto])
+            table_data.append(row_data)
+            row_styles[len(table_data)-1] = {'level': 1, 'color': ket}
 
+            # Sub-grup (KENDALA PELANGGAN, KENDALA TEKNIK)
+            for sub_group_name, error_codes in sub_ket.items():
+                sub_group_df = workfail_df[workfail_df['ERRORCODE'].isin(error_codes)]
+                sub_group_row = {'KET_ORDER': f"  {sub_group_name}"}
+                for sto in stos:
+                    sub_group_row[sto] = len(sub_group_df[sub_group_df['STO'] == sto])
+                table_data.append(sub_group_row)
+                row_styles[len(table_data)-1] = {'level': 2, 'color': ket}
+                
+                # Rincian error code
+                for error_code in error_codes:
+                    error_df = workfail_df[workfail_df['ERRORCODE'] == error_code]
+                    error_row = {'KET_ORDER': f"    {error_code}"}
+                    for sto in stos:
+                        error_row[sto] = len(error_df[error_df['STO'] == sto])
+                    if sum(list(error_row.values())[1:]) > 0: # Hanya tampilkan jika ada data
+                        table_data.append(error_row)
+                        row_styles[len(table_data)-1] = {'level': 3, 'color': ket}
+
+    display_df = pd.DataFrame(table_data).replace(0, '') # Ganti 0 dengan string kosong
+    display_df['Grand Total'] = display_df[stos].replace('', 0).sum(axis=1)
+
+    # Tambah baris Grand Total
+    grand_total_row = display_df[stos + ['Grand Total']].replace('', 0).sum().to_dict()
+    grand_total_row['KET_ORDER'] = 'Grand Total'
+    display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+    row_styles[len(display_df)-1] = {'level': 0, 'color': 'Grand Total'}
+
+    # --- 3. Hitung Metrik Ringkasan ---
+    status_counts = df['STATUS'].value_counts()
+    def get_count(s): return status_counts.get(s, 0)
+    
+    ps = get_count('COMPWORK')
+    acom = get_count('ACTCOMP') + get_count('VALSTART') + get_count('VALCOMP')
+    pi = get_count('STARTWORK')
+    pi_progress = get_count('INSTCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
+    kendala = get_count('WORKFAIL')
+    est_ps = ps + acom
+
+    summary_text = (
+        f"PS (COMPWORK) = {ps}\n"
+        f"ACOM (ACTCOMP+VALSTART+VALCOMP) = {acom}\n"
+        f"PI (STARTWORK) = {pi}\n"
+        f"PI PROGRESS (INSTCOMP+CONTWORK+PENDWORK) = {pi_progress}\n"
+        f"KENDALA (WORKFAIL) = {kendala}\n"
+        f"EST PS (PS+ACOM) = {est_ps}\n\n"
+        f"Source : KPRO Fulfillment Endstate"
+    )
+
+    # --- 4. Visualisasi dengan Matplotlib ---
+    fig_height = len(display_df) * 0.4 + 4 # Tinggi dinamis + ruang untuk teks
+    fig = plt.figure(figsize=(10, fig_height))
+    gs = fig.add_gridspec(2, 1, height_ratios=[len(display_df), 7])
+    
+    ax_table = fig.add_subplot(gs[0])
+    ax_text = fig.add_subplot(gs[1])
+    ax_table.axis('off'); ax_text.axis('off')
+
+    # Judul Utama
+    fig.suptitle(f"REPORT DAILY ENDSTATE {datetime.now().strftime('%d/%m/%Y %H.%M')}", fontsize=14, y=0.98)
+    
+    # Render Tabel
+    table = ax_table.table(
+        cellText=display_df.values, colLabels=['KET_ORDER'] + stos + ['Grand Total'],
+        loc='center', cellLoc='center'
+    )
+    table.auto_set_font_size(False); table.set_fontsize(9); table.scale(1, 1.5)
+
+    # Styling Tabel
+    color_map = {'COMPWORK': '#dff0d8', 'WORKFAIL': '#fcf8e3', 'Grand Total': '#d9edf7'}
+    for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor('black')
+        # Header
+        if row == 0:
+            cell.set_facecolor('#d9edf7'); cell.set_text_props(weight='bold')
+            if col == 0: cell.set_text_props(ha='left', va='center')
+            else: cell.set_text_props(ha='center', va='center')
+            continue
+            
+        # Styling baris berdasarkan info yang disimpan
+        style_info = row_styles.get(row - 1, {})
+        bg_color = color_map.get(style_info.get('color'))
+        if bg_color: cell.set_facecolor(bg_color)
+
+        # Alignment & Bold
+        if col == 0: cell.set_text_props(ha='left', va='center')
+        if style_info.get('level') in [0, 2]: cell.set_text_props(weight='bold')
+        
+        # Grand Total Column
+        if col == len(display_df.columns) - 1: cell.set_text_props(weight='bold')
+
+    # Render Teks Ringkasan
+    ax_text.text(0.01, 0.9, summary_text, ha='left', va='top', fontsize=10, linespacing=1.5)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     image_buffer = io.BytesIO()
-    plt.savefig(image_buffer, format='png', dpi=150)
+    plt.savefig(image_buffer, format='png', dpi=200)
     image_buffer.seek(0)
     plt.close(fig)
-    
     return image_buffer
 
-# --- Setup Bot Handlers (Tidak berubah) ---
+# --- Setup Bot Handlers & FastAPI (Tidak Berubah) ---
 def setup_handlers(application: Application):
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_excel_file))
 
-# --- FastAPI Lifespan Events ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Menangani event startup dan shutdown aplikasi FastAPI,
-    termasuk inisialisasi dan pembersihan bot Telegram.
-    """
     logger.info("Starting up FastAPI application...")
     setup_handlers(ptb_application)
-    
-    ptb_application.updater = None 
-    await ptb_application.initialize()
-    await ptb_application.start()
-    
+    await ptb_application.initialize(); await ptb_application.start()
     full_webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
     await ptb_application.bot.set_webhook(url=full_webhook_url)
     logger.info(f"Webhook set to {full_webhook_url}")
+    yield 
+    logger.info("Shutting down FastAPI application..."); await ptb_application.stop(); await ptb_application.shutdown()
 
-    yield # Di sini aplikasi Anda akan berjalan
-
-    logger.info("Shutting down FastAPI application...")
-    await ptb_application.stop()
-    await ptb_application.shutdown()
-    # await ptb_application.bot.delete_webhook() # Opsional
-    logger.info("Application stopped.")
-
-# Inisialisasi FastAPI dengan lifespan
 app = FastAPI(docs_url=None, redoc_url=None, lifespan=lifespan)
 
-# --- FastAPI Endpoints (Tidak berubah) ---
 @app.get("/")
-async def root():
-    return {"message": "Telegram Bot FastAPI is running!"}
-
+async def root(): return {"message": "Telegram Bot FastAPI is running!"}
 @app.post(WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
     try:
-        json_data = await request.json()
-        update = Update.de_json(json_data, ptb_application.bot)
-        await ptb_application.process_update(update)
-        return Response(status_code=200)
+        json_data = await request.json(); update = Update.de_json(json_data, ptb_application.bot)
+        await ptb_application.process_update(update); return Response(status_code=200)
     except Exception as e:
-        logger.error(f"Error processing webhook update: {e}", exc_info=True)
-        return Response(status_code=500)
+        logger.error(f"Error processing webhook update: {e}", exc_info=True); return Response(status_code=500)
