@@ -36,8 +36,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Bot ini akan membuat satu gambar dashboard terintegrasi untuk tanggal paling akhir di file Excel Anda."
     )
 
+# --- FUNGSI HANDLE FILE (DENGAN PERBAIKAN LOGIKA TIMESTAMP) ---
 async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # PERBAIKAN: Catat waktu saat ini (waktu unggah)
+    # PERBAIKAN: Catat waktu saat ini (waktu unggah) SEKARANG
     upload_timestamp = datetime.now()
     
     document = update.message.document
@@ -74,22 +75,24 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("Tidak ditemukan data dengan tanggal valid di kolom STATUSDATE.")
             return
             
+        # Logika Inti: Temukan tanggal terakhir HANYA untuk filter data
         latest_date_in_file = df['STATUSDATE'].dt.date.max()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date_in_file].copy()
         
         status_counts = daily_df['STATUS'].value_counts()
         
-        # Kirim timestamp unggah ke fungsi dashboard
+        # PERBAIKAN: Kirim timestamp UNGGAH (upload_timestamp) ke fungsi dashboard untuk judul
         image_buffer = create_integrated_dashboard(daily_df, upload_timestamp, status_counts) 
+        
         caption = f"REPORT DAILY ENDSTATE JAKPUS - {upload_timestamp.strftime('%d %B %Y')}"
-        await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date_in_file}.png"), caption=caption)
+        await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{upload_timestamp.strftime('%Y-%m-%d')}.png"), caption=caption)
 
     except Exception as e:
         logger.error(f"Error processing file: {e}", exc_info=True)
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN TIMESTAMP REAL-TIME) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (Kode tidak berubah, hanya parameter yang diterima) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
@@ -155,7 +158,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    # PERBAIKAN: Menggunakan timestamp unggah untuk judul
+    # PERBAIKAN: Menggunakan timestamp unggah (report_timestamp) untuk judul
     ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
@@ -218,7 +221,7 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"PS (COMPWORK)                 = {ps}\n"
         f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
         f"PI (STARTWORK)                  = {pi}\n"
-        f"PI PROGRESS (INSTCOMP+...)      = {pi_progress}\n"
+        f"PI PROGRESS (INSTCOMP+CONTWORK+PENDWORK) = {pi_progress}\n"
         f"KENDALA (WORKFAIL)              = {kendala}\n"
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
