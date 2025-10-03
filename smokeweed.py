@@ -83,7 +83,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN PERBAIKAN 'child_artists') ---
+# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN PERBAIKAN FINAL) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
@@ -131,7 +131,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     num_rows = len(display_df)
     fig_height = num_rows * 0.5 + 1.5
     
-    fig, ax = plt.subplots(figsize=(12, fig_height)) 
+    fig, ax = plt.subplots(figsize=(12, fig_height))
     ax.axis('off')
     
     # Judul
@@ -139,9 +139,13 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     fig.text(0.05, 0.95, f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
              ha='left', va='center', fontsize=16, weight='bold', color='#2F3E46')
     
-    # Tabel
+    # --- PERBAIKAN: Definisikan lebar kolom sebelum membuat tabel ---
+    num_sto_cols = len(stos) + 1 # STOs + Grand Total
+    col_widths = [0.35] + [0.08] * num_sto_cols # [lebar_kategori, lebar_sto, lebar_sto, ...]
+    
+    # Tabel dengan colWidths
     table = ax.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
-                     loc='center', cellLoc='center')
+                     loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
     # Styling
@@ -150,17 +154,10 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
         'WORKFAIL': '#FFFFE0',
         'Total': '#F5F5F5'
     }
-    
-    # --- PERBAIKAN LOGIKA LEBAR KOLOM DAN STYLING ---
+
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor('#D3D3D3')
         cell.set_linewidth(0.8)
-
-        # Atur Lebar Kolom di dalam loop ini
-        if col_idx == 0:
-            cell.set_width(0.35) # Kolom Kategori lebar
-        else:
-            cell.set_width(0.08) # Kolom STO dan Grand Total seragam
 
         # Header
         if row_idx == 0:
