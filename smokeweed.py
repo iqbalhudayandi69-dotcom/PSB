@@ -83,27 +83,23 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (REVISI FINAL SESUAI GAMBAR) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN LEBAR KOLOM YANG DIPERBAIKI) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
-    status_order = ['CANCLWORK', 'COMPWORK', 'STARTWORK', 'WORKFAIL', 'ACOMP', 'VALCOMP', 'VALSTART', 'INTSCOMP', 'PENDWORK', 'CONTWORK']
+    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
     
-    # PERBAIKAN: Loop melalui semua status yang ditentukan untuk konsistensi
     for status in status_order:
         status_df = daily_df[daily_df['STATUS'] == status]
         
-        # Selalu tampilkan baris status utama, bahkan jika 0, kecuali WORKFAIL
-        if status_df.empty and status != 'WORKFAIL':
-            continue
-
+        # Logika baru: Selalu buat baris data, bahkan jika kosong, untuk menjaga struktur
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
-        # Hanya tampilkan baris jika ada data di Grand Total, kecuali WORKFAIL
+        # Hanya tampilkan baris jika ada datanya, atau jika itu WORKFAIL
         if sum(list(row_data.values())[1:]) > 0 or status == 'WORKFAIL':
             table_data.append(row_data)
             row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
@@ -137,7 +133,8 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     num_rows = len(display_df)
     fig_height = num_rows * 0.5 + 1.5
     
-    fig, ax = plt.subplots(figsize=(10, fig_height))
+    # PERBAIKAN: Ukuran figure lebih lebar untuk mengakomodasi kolom Kategori
+    fig, ax = plt.subplots(figsize=(12, fig_height)) 
     ax.axis('off')
     
     # Judul
@@ -150,12 +147,23 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
                      loc='center', cellLoc='center')
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # PERBAIKAN: Styling presisi sesuai gambar
+    # Styling
     color_map = {
-        'COMPWORK': '#F0FFF0',   # Hijau pucat
-        'WORKFAIL': '#FFFFE0',   # Kuning pucat
-        'Total': '#F5F5F5'      # Abu-abu sangat muda
+        'COMPWORK': '#F0FFF0',
+        'WORKFAIL': '#FFFFE0',
+        'Total': '#F5F5F5'
     }
+
+    # PERBAIKAN: Logika lebar kolom
+    table_props = table.properties()
+    table_cells = table_props['child_artists']
+    for cell in table_cells:
+        # Mengatur lebar kolom secara manual
+        col_idx = cell.get_celld()[(0, 1)]
+        if col_idx == 0:
+            cell.set_width(0.4) # Kolom Kategori lebar
+        else:
+            cell.set_width(0.08) # Kolom STO dan Grand Total seragam
 
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor('#D3D3D3')
@@ -179,25 +187,18 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
         if col_idx > 0: # Kolom numerik
             numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
             cell.get_text().set_text(f"{numeric_value:,.0f}" if pd.notna(numeric_value) and numeric_value > 0 else "")
+            cell.set_text_props(ha='center', va='center', weight='bold')
         else: # Kolom Kategori
             cell.get_text().set_text(data_row.iloc[col_idx])
-            cell.set_text_props(ha='left'); cell.PAD = 0.05
+            cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
         
-        # Font Styling (Semua tebal)
-        cell.get_text().set_weight('bold')
-        
-        # PERBAIKAN: Atur Lebar Kolom
-        if col_idx == 0:
-            cell.set_width(0.35) # Lebarkan kolom Kategori
-        else:
-            cell.set_width(0.1)
-
     plt.tight_layout()
     image_buffer = io.BytesIO()
     plt.savefig(image_buffer, format='png', dpi=200); image_buffer.seek(0); plt.close(fig)
     return image_buffer
 
 def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
+    # (Fungsi ini tidak berubah)
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
     report_time = datetime.now().strftime('%H:%M:%S')
