@@ -58,7 +58,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         df = pd.read_excel(file_buffer)
 
-        required_headers = ['SCORDERNO', 'DATE LAMA', 'STO', 'DATECREATED', 'STATUSDATE', 
+        required_headers = ['SCORDERNO', 'DATEL LAMA', 'STO', 'DATECREATED', 'STATUSDATE', 
                             'STATUS', 'ERRORCODE', 'SUBERRORCODE', 'TGL_MANJA']
         
         missing_headers = [header for header in required_headers if header not in df.columns]
