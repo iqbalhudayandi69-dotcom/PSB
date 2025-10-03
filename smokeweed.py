@@ -71,13 +71,18 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("Tidak ditemukan data dengan tanggal valid di kolom STATUSDATE.")
             return
             
-        latest_date = df['STATUSDATE'].dt.date.max()
+        # PERBAIKAN: Ambil timestamp lengkap yang paling akhir
+        latest_timestamp = df['STATUSDATE'].max()
+        
+        # Filter DataFrame berdasarkan tanggal dari timestamp tersebut
+        latest_date = latest_timestamp.date()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date].copy()
         
         status_counts = daily_df['STATUS'].value_counts()
         
-        image_buffer = create_integrated_dashboard(daily_df, latest_date, status_counts) 
-        caption = f"REPORT DAILY ENDSTATE JAKPUS - {latest_date.strftime('%d %B %Y')}"
+        # Kirim timestamp lengkap ke fungsi dashboard
+        image_buffer = create_integrated_dashboard(daily_df, latest_timestamp, status_counts) 
+        caption = f"REPORT DAILY ENDSTATE JAKPUS - {latest_timestamp.strftime('%d %B %Y')}"
         await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
     except Exception as e:
@@ -85,22 +90,20 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN JUDUL & LOGIKA STATUS BARU) ---
-def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date, status_counts: pd.Series) -> io.BytesIO:
+# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN PERBAIKAN FINAL) ---
+def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
-    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
+    # PERBAIKAN: Mengubah INTSCOMP menjadi INSTCOMP
+    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
     
-    # PERBAIKAN: Logika untuk memastikan semua status yang ada di data muncul
     unique_statuses_in_data = daily_df['STATUS'].unique()
     
     for status in status_order:
-        # Hanya proses status jika ada di dalam data harian
-        if status not in unique_statuses_in_data:
-            continue
+        if status not in unique_statuses_in_data: continue
             
         status_df = daily_df[daily_df['STATUS'] == status]
         
@@ -126,7 +129,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
                         table_data.append(sub_error_row)
                         row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
-    if not table_data: return create_empty_dashboard(report_date)
+    if not table_data: return create_empty_dashboard(report_timestamp)
 
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
@@ -154,9 +157,8 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    report_time = datetime.now().strftime('%H:%M:%S')
-    # PERBAIKAN: Judul diubah
-    ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
+    # PERBAIKAN: Menggunakan timestamp lengkap untuk judul
+    ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
     col_widths = [0.35] + [0.08] * (len(stos) + 1)
@@ -208,7 +210,8 @@ def create_summary_text(status_counts: pd.Series) -> str:
     ps = get_count('COMPWORK')
     acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
     pi = get_count('STARTWORK')
-    pi_progress = get_count('INTSCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
+    # PERBAIKAN: Mengubah INTSCOMP menjadi INSTCOMP
+    pi_progress = get_count('INSTCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
     kendala = get_count('WORKFAIL')
     est_ps = ps + acom
 
@@ -223,12 +226,10 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
 
-def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
+def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
-    report_time = datetime.now().strftime('%H:%M:%S')
-    # PERBAIKAN: Judul diubah
-    fig.suptitle(f"REPORT DAILY ENDSTATE JAKPUS - {report_date.strftime('%d %B %Y').upper()} {report_time}", fontsize=16, weight='bold')
+    fig.suptitle(f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", fontsize=16, weight='bold')
     ax.text(0.5, 0.5, "Tidak ada data untuk status yang relevan pada tanggal ini.", ha='center', va='center', fontsize=12, wrap=True)
     plt.tight_layout()
     image_buffer = io.BytesIO()
