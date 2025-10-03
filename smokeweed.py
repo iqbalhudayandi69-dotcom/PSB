@@ -74,7 +74,10 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         latest_date = df['STATUSDATE'].dt.date.max()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date].copy()
         
-        image_buffer = create_integrated_dashboard(daily_df, latest_date) 
+        # PERBAIKAN: Hitung status counts sekali saja
+        status_counts = daily_df['STATUS'].value_counts()
+        
+        image_buffer = create_integrated_dashboard(daily_df, latest_date, status_counts) 
         caption = f"Laporan Harian (Terupdate) - {latest_date.strftime('%d %B %Y')}"
         await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
@@ -83,8 +86,8 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD TERINTEGRASI (DENGAN FREETEXT) ---
-def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
+# --- FUNGSI PEMBUATAN DASHBOARD TERINTEGRASI (LOGIKA TERPUSAT) ---
+def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
@@ -98,6 +101,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
+        # Tampilkan baris jika Grand Total-nya > 0 atau jika itu WORKFAIL (bahkan jika 0)
         if sum(list(row_data.values())[1:]) > 0 or status == 'WORKFAIL':
             table_data.append(row_data)
             row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
@@ -123,23 +127,29 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
-    grand_total_row = display_df[stos + ['Grand Total']].sum().to_dict(); grand_total_row['KATEGORI'] = 'Grand Total'
+    # PERBAIKAN: Grand Total dihitung dari data sumber, bukan dari tabel yang mungkin tidak lengkap
+    grand_total_source = daily_df[daily_df['STATUS'].isin(display_df['KATEGORI'].unique())]
+    grand_total_row = {'KATEGORI': 'Grand Total'}
+    for sto in stos:
+        grand_total_row[sto] = len(grand_total_source[grand_total_source['STO'] == sto])
+    grand_total_row['Grand Total'] = sum(list(grand_total_row.values())[1:])
+    
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # --- 2. Perhitungan Teks Ringkasan ---
-    summary_text = create_summary_text(daily_df)
+    # --- 2. Perhitungan Teks Ringkasan (dari status_counts) ---
+    summary_text = create_summary_text(status_counts)
 
-    # --- 3. Visualisasi dengan GridSpec ---
+    # --- 3. Visualisasi ---
     num_rows = len(display_df)
-    fig_height = num_rows * 0.5 + 5 # Menambah ruang untuk footer
+    fig_height = num_rows * 0.5 + 4.5
     
     fig = plt.figure(figsize=(12, fig_height))
-    gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 4]) # Menambah height ratio footer
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 5])
     
     ax_title = fig.add_subplot(gs[0]); ax_title.axis('off')
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
-    ax_text = fig.add_subplot(gs[2]); ax_text.axis('off') # Area untuk teks ringkasan
+    ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
     # Render Judul
     report_time = datetime.now().strftime('%H:%M:%S')
@@ -152,7 +162,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
                            loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # Styling Tabel
+    # Styling
     color_map = {'COMPWORK': '#F0FFF0', 'WORKFAIL': '#FFFFE0', 'Total': '#F5F5F5'}
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor('#D3D3D3'); cell.set_linewidth(0.8)
@@ -178,13 +188,12 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     plt.savefig(image_buffer, format='png', dpi=200); image_buffer.seek(0); plt.close(fig)
     return image_buffer
 
-def create_summary_text(daily_df: pd.DataFrame) -> str:
-    # (Fungsi ini tidak berubah)
-    status_counts = daily_df['STATUS'].value_counts()
+def create_summary_text(status_counts: pd.Series) -> str:
+    # PERBAIKAN: Fungsi ini sekarang menerima status_counts yang sudah dihitung
     def get_count(s): return status_counts.get(s, 0)
     
     ps = get_count('COMPWORK')
-    acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP') # Asumsi ACTCOMP diganti ACOMP
+    acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
     pi = get_count('STARTWORK')
     pi_progress = get_count('INTSCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
     kendala = get_count('WORKFAIL')
