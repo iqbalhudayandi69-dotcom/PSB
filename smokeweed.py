@@ -83,37 +83,50 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (GAYA BARU SESUAI GAMBAR) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (REVISI FINAL SESUAI GAMBAR) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
-    # Urutan bisa disesuaikan jika perlu
-    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
+    status_order = ['CANCLWORK', 'COMPWORK', 'STARTWORK', 'WORKFAIL', 'ACOMP', 'VALCOMP', 'VALSTART', 'INTSCOMP', 'PENDWORK', 'CONTWORK']
     
     table_data, row_styles = [], {}
     
+    # PERBAIKAN: Loop melalui semua status yang ditentukan untuk konsistensi
     for status in status_order:
         status_df = daily_df[daily_df['STATUS'] == status]
-        if status_df.empty: continue
+        
+        # Selalu tampilkan baris status utama, bahkan jika 0, kecuali WORKFAIL
+        if status_df.empty and status != 'WORKFAIL':
+            continue
 
-        row_data = {'KATEGORI': status}; [row_data.update({sto: len(status_df[status_df['STO'] == sto])}) for sto in stos]
-        table_data.append(row_data); row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
+        row_data = {'KATEGORI': status}
+        for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
+        
+        # Hanya tampilkan baris jika ada data di Grand Total, kecuali WORKFAIL
+        if sum(list(row_data.values())[1:]) > 0 or status == 'WORKFAIL':
+            table_data.append(row_data)
+            row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
         if status == 'WORKFAIL':
             for error_code, error_group in status_df.groupby('ERRORCODE'):
                 if error_code in ['NAN', 'N/A']: continue
-                error_row = {'KATEGORI': f"  ↳ {error_code}"}; [error_row.update({sto: len(error_group[error_group['STO'] == sto])}) for sto in stos]
-                table_data.append(error_row); row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
+                error_row = {'KATEGORI': f"  ↳ {error_code}"}
+                for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
+                table_data.append(error_row)
+                row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
 
                 for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
                     if sub_error_code in ['NAN', 'N/A']: continue
-                    sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}; [sub_error_row.update({sto: len(sub_error_group[sub_error_group['STO'] == sto])}) for sto in stos]
-                    table_data.append(sub_error_row); row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
+                    sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
+                    for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
+                    if sum(list(sub_error_row.values())[1:]) > 0:
+                        table_data.append(sub_error_row)
+                        row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
     if not table_data: return create_empty_dashboard(report_date)
 
-    display_df = pd.DataFrame(table_data).fillna(0)
+    display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
     grand_total_row = display_df[stos + ['Grand Total']].sum().to_dict(); grand_total_row['KATEGORI'] = 'Grand Total'
@@ -122,7 +135,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
 
     # --- 2. Visualisasi ---
     num_rows = len(display_df)
-    fig_height = num_rows * 0.5 + 2 # Menambah tinggi per baris
+    fig_height = num_rows * 0.5 + 1.5
     
     fig, ax = plt.subplots(figsize=(10, fig_height))
     ax.axis('off')
@@ -137,15 +150,15 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
                      loc='center', cellLoc='center')
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # Styling
+    # PERBAIKAN: Styling presisi sesuai gambar
     color_map = {
-        'COMPWORK': '#F0FFF0', # Hijau pucat
-        'WORKFAIL': '#FFFFE0', # Kuning pucat
-        'Total': '#F5F5F5'  # Abu-abu sangat muda
+        'COMPWORK': '#F0FFF0',   # Hijau pucat
+        'WORKFAIL': '#FFFFE0',   # Kuning pucat
+        'Total': '#F5F5F5'      # Abu-abu sangat muda
     }
 
     for (row_idx, col_idx), cell in table.get_celld().items():
-        cell.set_edgecolor('#D3D3D3') # Garis abu-abu muda
+        cell.set_edgecolor('#D3D3D3')
         cell.set_linewidth(0.8)
 
         # Header
@@ -154,23 +167,31 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
             continue
 
         style = row_styles.get(row_idx - 1, {})
-        data_row = display_df.iloc[row_idx-1]
+        data_row = display_df.iloc[row_idx - 1]
         
         # Pewarnaan Baris
         bg_color = 'white'
-        status = style.get('status')
-        if status in color_map: bg_color = color_map[status]
+        status_key = style.get('status')
+        if status_key in color_map: bg_color = color_map[status_key]
         cell.set_facecolor(bg_color)
         
         # Teks & Data
         if col_idx > 0: # Kolom numerik
             numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
             cell.get_text().set_text(f"{numeric_value:,.0f}" if pd.notna(numeric_value) and numeric_value > 0 else "")
-            cell.set_text_props(ha='center', va='center', weight='bold')
         else: # Kolom Kategori
             cell.get_text().set_text(data_row.iloc[col_idx])
-            cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
-    
+            cell.set_text_props(ha='left'); cell.PAD = 0.05
+        
+        # Font Styling (Semua tebal)
+        cell.get_text().set_weight('bold')
+        
+        # PERBAIKAN: Atur Lebar Kolom
+        if col_idx == 0:
+            cell.set_width(0.35) # Lebarkan kolom Kategori
+        else:
+            cell.set_width(0.1)
+
     plt.tight_layout()
     image_buffer = io.BytesIO()
     plt.savefig(image_buffer, format='png', dpi=200); image_buffer.seek(0); plt.close(fig)
