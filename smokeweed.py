@@ -3,11 +3,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from telegram import Update, Bot, InputFile
-from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes, TypeHandler
+from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
 import io
 import os
 from fastapi import FastAPI, Request, Response
-from pydantic import BaseModel
 
 # Konfigurasi Logging
 logging.basicConfig(
@@ -21,7 +20,7 @@ WEBHOOK_URL = "https://psbiqbal.onrender.com"
 WEBHOOK_PATH = "/telegram" # Path di mana FastAPI akan menerima update
 
 # Inisialisasi FastAPI
-app = FastAPI(docs_url=None, redoc_url=None) # Menonaktifkan docs default
+app = FastAPI(docs_url=None, redoc_url=None) # Menonaktifkan docs default FastAPI
 
 # Inisialisasi Application (python-telegram-bot)
 # Kita akan membuatnya sebagai global atau singleton
@@ -35,6 +34,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Mengirim pesan sambutan saat perintah /start dipanggil."""
     await update.message.reply_text(
         "Halo! Kirimkan file Excel (.xls atau .xlsx) Anda, dan saya akan membuatkan dashboard."
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Mengirim pesan bantuan saat perintah /help dipanggil."""
+    await update.message.reply_text(
+        "Saya adalah bot pembuat dashboard Excel. "
+        "Cukup kirimkan saya file Excel (.xls atau .xlsx) dengan header utama seperti 'SCORDERNO', 'STATUS', dll., "
+        "dan saya akan membuatkan dashboard visual untuk Anda."
+        "\n\nPerintah yang tersedia:\n/start - Memulai interaksi\n/help - Menampilkan pesan bantuan ini"
     )
 
 async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -85,7 +93,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Dashboard Anda siap!")
 
     except Exception as e:
-        logger.error(f"Error processing file: {e}", exc_info=True)
+        logger.error(f"Error processing file: {e}", exc_info=True) # Baris ini sudah lengkap
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
@@ -105,6 +113,7 @@ def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
     df_filtered['STATUS_DATE_ONLY'] = df_filtered['STATUSDATE'].dt.date
     
     # Menghitung jumlah SCORDERNO unik per STATUS dan per tanggal
+    # Ini menghitung jumlah baris untuk setiap kombinasi status dan tanggal
     status_counts = df_filtered.groupby(['STATUS_DATE_ONLY', 'STATUS']).size().reset_index(name='Jumlah SCORDERNO')
 
     # Membuat pivot table untuk visualisasi yang lebih mudah
@@ -119,14 +128,22 @@ def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
     pivot_table = pivot_table[target_statuses]
 
     # --- Visualisasi Dashboard ---
-    fig, axes = plt.subplots(nrows=len(target_statuses), ncols=1, figsize=(15, 5 * len(target_statuses)), sharex=True)
+    # Menentukan ukuran figure secara dinamis agar sesuai dengan jumlah status
+    fig_height = 4 * len(target_statuses) # Setiap plot status sekitar 4 inci tinggi
+    fig, axes = plt.subplots(nrows=len(target_statuses), ncols=1, figsize=(15, fig_height), sharex=True)
     fig.suptitle('Dashboard SCORDERNO Status Tren Harian', fontsize=16)
 
-    if len(target_statuses) == 1: # Handle case with single status
+    # Pastikan 'axes' adalah list/array bahkan jika hanya ada 1 subplot
+    if len(target_statuses) == 1:
         axes = [axes]
 
     for i, status in enumerate(target_statuses):
-        sns.lineplot(data=pivot_table, x=pivot_table.index, y=status, ax=axes[i], marker='o')
+        # Pastikan ada data untuk diplot, jika tidak, plot kosong atau skip
+        if not pivot_table[status].empty:
+            sns.lineplot(data=pivot_table, x=pivot_table.index, y=status, ax=axes[i], marker='o')
+        else:
+            axes[i].text(0.5, 0.5, 'Tidak ada data untuk status ini', horizontalalignment='center', verticalalignment='center', transform=axes[i].transAxes)
+        
         axes[i].set_title(f'Jumlah SCORDERNO untuk STATUS: {status}')
         axes[i].set_ylabel('Jumlah SCORDERNO')
         axes[i].grid(True, linestyle='--', alpha=0.7)
@@ -137,7 +154,7 @@ def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
 
     # Menyimpan plot ke buffer gambar
     image_buffer = io.BytesIO()
-    plt.savefig(image_buffer, format='png')
+    plt.savefig(image_buffer, format='png', dpi=150) # Menambah dpi untuk kualitas gambar lebih baik
     image_buffer.seek(0) # Kembali ke awal buffer
     plt.close(fig) # Penting untuk menutup figure agar tidak menghabiskan memori
     
@@ -146,9 +163,8 @@ def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
 # --- Setup Bot Handlers ---
 def setup_handlers(application: Application):
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command)) # Menambahkan perintah /help
     application.add_handler(MessageHandler(filters.Document.ALL, handle_excel_file))
-    # Menambahkan error handler jika diperlukan
-    # application.add_error_handler(error_handler)
 
 # --- FastAPI Endpoints ---
 
@@ -156,23 +172,25 @@ def setup_handlers(application: Application):
 async def startup_event():
     logger.info("Starting up...")
     setup_handlers(ptb_application)
-    # Mulai prosesing update secara async (tanpa polling)
-    ptb_application.updater = None # Memastikan updater tidak berjalan di mode polling
+    
+    # Menghentikan polling yang mungkin aktif dan memulai Application secara async
+    # Ini memastikan tidak ada konflik dengan mode webhook
+    ptb_application.updater = None 
     await ptb_application.start()
     
     # Menyiapkan webhook di Telegram
-    # Pastikan URL_WEBHOOK_PATH_DI_SERVER = WEBHOOK_URL + WEBHOOK_PATH
-    await ptb_application.bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
-    logger.info(f"Webhook set to {WEBHOOK_URL}{WEBHOOK_PATH}")
+    full_webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+    await ptb_application.bot.set_webhook(url=full_webhook_url)
+    logger.info(f"Webhook set to {full_webhook_url}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down...")
     await ptb_application.stop()
     await ptb_application.shutdown()
-    # Opsional: Hapus webhook saat shutdown
-    # await ptb_application.bot.delete_webhook()
-    logger.info("Webhook deleted and application stopped.")
+    # Opsional: Hapus webhook saat shutdown agar tidak ada sisa konfigurasi yang mengarah ke server yang mati
+    # await ptb_application.bot.delete_webhook() 
+    logger.info("Application stopped.")
 
 @app.get("/")
 async def root():
@@ -186,11 +204,10 @@ async def telegram_webhook(request: Request):
         json_data = await request.json()
         
         # Meneruskan update ke Application python-telegram-bot
-        # ptb_application.update_queue.put_nowait(Update.de_json(json_data, ptb_application.bot)) # V20
-        # Di PTB v20, proses_update menggunakan objek Update langsung
         update = Update.de_json(json_data, ptb_application.bot)
         await ptb_application.process_update(update)
 
-        return Response(status_code=200)
+        return Response(status_code=200) # Telegram mengharapkan 200 OK
     except Exception as e:
-        logger.error(f"Error processing
+        logger.error(f"Error processing webhook update: {e}", exc_info=True)
+        return Response(status_code=500) # Beri tahu Telegram ada kesalahan
