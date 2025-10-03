@@ -28,12 +28,12 @@ ptb_application = (
 # --- Fungsi Utility Bot ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Halo! Kirimkan file Excel (.xls atau .xlsx) Anda, dan saya akan membuatkan dashboard harian."
+        "Halo! Kirimkan file Excel (.xls atau .xlsx) Anda, dan saya akan membuatkan dashboard untuk tanggal terupdate."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Bot ini akan membuat gambar dashboard untuk setiap tanggal yang ada di file Excel Anda.\n\n"
+        "Bot ini akan membuat gambar dashboard untuk tanggal paling akhir (terupdate) yang ada di file Excel Anda.\n\n"
         "Dashboard akan menampilkan ringkasan STATUS vs STO, dengan rincian ERRORCODE untuk WORKFAIL."
     )
 
@@ -44,7 +44,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Mohon unggah file dengan format .xls atau .xlsx.")
         return
 
-    await update.message.reply_text("Menerima file Anda, sedang memproses semua tanggal...")
+    await update.message.reply_text("Menerima file Anda, mencari tanggal terupdate...")
 
     try:
         file_id = document.file_id
@@ -65,33 +65,33 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
 
-        # --- LOGIKA INTI: FLAGGING STATUSDATE ---
+        # --- LOGIKA INTI: HANYA AMBIL TANGGAL TERUPDATE ---
         df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
         df.dropna(subset=['STATUSDATE'], inplace=True)
-        df['DATE_ONLY'] = df['STATUSDATE'].dt.date
         
-        unique_dates = sorted(df['DATE_ONLY'].unique())
-
-        if not unique_dates:
+        if df.empty:
             await update.message.reply_text("Tidak ditemukan data dengan tanggal yang valid di kolom STATUSDATE.")
             return
-
-        await update.message.reply_text(f"Ditemukan data untuk {len(unique_dates)} tanggal. Membuat dashboard untuk masing-masing...")
-
-        for report_date in unique_dates:
-            daily_df = df[df['DATE_ONLY'] == report_date].copy()
-            image_buffer = create_dashboard(daily_df, report_date) 
             
-            # Mengirim caption dengan tanggal laporan
-            caption = f"Dashboard untuk tanggal {report_date.strftime('%d %B %Y')}"
-            await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{report_date}.png"), caption=caption)
+        # Temukan tanggal paling akhir
+        latest_date = df['STATUSDATE'].dt.date.max()
+
+        await update.message.reply_text(f"Membuat dashboard untuk tanggal terupdate: {latest_date.strftime('%d %B %Y')}...")
+        
+        # Filter DataFrame hanya untuk tanggal tersebut
+        daily_df = df[df['STATUSDATE'].dt.date == latest_date].copy()
+        
+        # Buat dan kirim satu dashboard
+        image_buffer = create_dashboard(daily_df, latest_date) 
+        caption = f"Dashboard untuk tanggal terupdate {latest_date.strftime('%d %B %Y')}"
+        await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
     except Exception as e:
         logger.error(f"Error processing file: {e}", exc_info=True)
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI create_dashboard BARU DENGAN DESAIN YANG DIPERBAIKI ---
+# --- FUNGSI create_dashboard (Tidak Berubah dari Versi Sebelumnya) ---
 def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     """
     Membuat dashboard visual hierarkis yang dipercantik untuk satu hari.
@@ -104,24 +104,21 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
 
     stos = sorted(daily_df['STO'].unique())
     
-    # Urutan status yang diinginkan
     status_order = ['ACOMP', 'STARTWORK', 'INTSCOMP', 'WORKFAIL', 'VALCOMP', 'VALSTART', 'CANCELWORK', 'COMPWORK']
 
     table_data = []
-    row_styles = {} # Menyimpan info styling per baris
+    row_styles = {}
     
     for status in status_order:
         status_df = daily_df[daily_df['STATUS'] == status]
-        if status_df.empty: continue # Lewati status jika tidak ada datanya
+        if status_df.empty: continue
 
-        # Baris STATUS utama
         row_data = {'KATEGORI': status}
         for sto in stos:
             row_data[sto] = len(status_df[status_df['STO'] == sto])
         table_data.append(row_data)
         row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
-        # Logika Kondisional: Rincian untuk WORKFAIL
         if status == 'WORKFAIL':
             error_counts = status_df.groupby('ERRORCODE').size()
             for error_code, count in error_counts.items():
@@ -132,7 +129,7 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
                 table_data.append(error_row)
                 row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
 
-    if not table_data: # Jika tidak ada data sama sekali untuk status yang dicari
+    if not table_data:
         return create_empty_dashboard(report_date)
 
     display_df = pd.DataFrame(table_data)
@@ -143,7 +140,6 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # Ganti 0 dengan string kosong untuk kebersihan visual
     for sto in stos:
         display_df[sto] = display_df[sto].apply(lambda x: '' if x == 0 else x)
 
@@ -152,37 +148,32 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
     fig, ax = plt.subplots(figsize=(12, fig_height))
     ax.axis('off')
     
-    fig.suptitle(f"LAPORAN HARIAN - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
+    fig.suptitle(f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
 
     table = ax.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'],
                       loc='center', cellLoc='center')
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 1.8)
 
-    # Styling Lanjutan
     color_map = {'COMPWORK': '#E8F5E9', 'WORKFAIL': '#FFF9C4', 'Total': '#F5F5F5'}
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor('#E0E0E0')
         cell.set_height(0.05)
 
-        # Header
         if row_idx == 0:
             cell.set_facecolor('#424242'); cell.set_text_props(color='white', weight='bold')
             continue
 
         style = row_styles.get(row_idx - 1, {})
         
-        # Warna Latar
         bg_color = color_map.get(style.get('status'))
         if bg_color: cell.set_facecolor(bg_color)
             
-        # Teks
-        if col_idx == 0: # Kolom Kategori
+        if col_idx == 0:
             cell.set_text_props(ha='left', va='center')
-            cell.PAD = 0.05 # Padding kiri
+            cell.PAD = 0.05
         else:
             cell.set_text_props(ha='center', va='center')
 
-        # Bold untuk Level 1 (STATUS) dan Level 0 (Total)
         if style.get('level') in [0, 1]:
             cell.set_text_props(weight='bold')
 
@@ -194,10 +185,9 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
     return image_buffer
 
 def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
-    """Membuat gambar placeholder jika tidak ada data."""
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
-    fig.suptitle(f"LAPORAN HARIAN - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
+    fig.suptitle(f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
     ax.text(0.5, 0.5, "Tidak ada data untuk status yang relevan pada tanggal ini.", 
             ha='center', va='center', fontsize=12, wrap=True)
     plt.tight_layout(rect=[0, 0, 1, 0.9])
