@@ -83,23 +83,21 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN LEBAR KOLOM YANG DIPERBAIKI) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN PERBAIKAN 'child_artists') ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
-    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
+    status_order = ['CANCLWORK', 'COMPWORK', 'STARTWORK', 'WORKFAIL', 'ACOMP', 'VALCOMP', 'VALSTART', 'INTSCOMP', 'PENDWORK', 'CONTWORK']
     
     table_data, row_styles = [], {}
     
     for status in status_order:
         status_df = daily_df[daily_df['STATUS'] == status]
         
-        # Logika baru: Selalu buat baris data, bahkan jika kosong, untuk menjaga struktur
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
-        # Hanya tampilkan baris jika ada datanya, atau jika itu WORKFAIL
         if sum(list(row_data.values())[1:]) > 0 or status == 'WORKFAIL':
             table_data.append(row_data)
             row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
@@ -133,7 +131,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     num_rows = len(display_df)
     fig_height = num_rows * 0.5 + 1.5
     
-    # PERBAIKAN: Ukuran figure lebih lebar untuk mengakomodasi kolom Kategori
     fig, ax = plt.subplots(figsize=(12, fig_height)) 
     ax.axis('off')
     
@@ -153,21 +150,17 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
         'WORKFAIL': '#FFFFE0',
         'Total': '#F5F5F5'
     }
-
-    # PERBAIKAN: Logika lebar kolom
-    table_props = table.properties()
-    table_cells = table_props['child_artists']
-    for cell in table_cells:
-        # Mengatur lebar kolom secara manual
-        col_idx = cell.get_celld()[(0, 1)]
-        if col_idx == 0:
-            cell.set_width(0.4) # Kolom Kategori lebar
-        else:
-            cell.set_width(0.08) # Kolom STO dan Grand Total seragam
-
+    
+    # --- PERBAIKAN LOGIKA LEBAR KOLOM DAN STYLING ---
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor('#D3D3D3')
         cell.set_linewidth(0.8)
+
+        # Atur Lebar Kolom di dalam loop ini
+        if col_idx == 0:
+            cell.set_width(0.35) # Kolom Kategori lebar
+        else:
+            cell.set_width(0.08) # Kolom STO dan Grand Total seragam
 
         # Header
         if row_idx == 0:
