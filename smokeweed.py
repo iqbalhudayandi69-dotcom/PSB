@@ -78,7 +78,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         # Pembuatan & Pengiriman Laporan Tunggal
         image_buffer = create_integrated_dashboard(daily_df, latest_date) 
-        caption = f"Laporan Harian Dashboard Up To Date - {latest_date.strftime('%d %B %Y')}"
+        caption = f"Laporan Harian Dashboard Up To Date - {latest_date.strftime('%d %B %Y %H:%M:%S')}"
         await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
     except Exception as e:
@@ -139,7 +139,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     # Render Judul
     report_time = datetime.now().strftime('%H:%M')
     ax_title.text(0.01, 0.8, "Laporan Harian Dashboard Up To Date", ha='left', va='top', fontsize=18, weight='bold', color='#2F3E46')
-    ax_title.text(0.01, 0.3, f"{report_date.strftime('%d %B %Y').upper()} - {report_time}", ha='left', va='top', fontsize=12, color='#588157')
+    ax_title.text(0.01, 0.3, f"{report_date.strftime('%d %B %Y "%H:%M:%S').upper()} - {report_time}", ha='left', va='top', fontsize=12, color='#588157')
     
     # Render Tabel
     table = ax_table.table(cellText=[['']*len(display_df.columns)]*len(display_df), colLabels=['KATEGORI'] + stos + ['Grand Total'], loc='center', cellLoc='center')
@@ -147,14 +147,14 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
 
     # Styling Tabel
     color_map = {
-        'COMPWORK': ('#556B2F', 'white'), # Moss Green
-        'ACOMP': ('#9ACD32', 'black'), # Leaf Green (YellowGreen for better readability)
-        'VALCOMP': ('#9ACD32', 'black'), # Leaf Green
-        'VALSTART': ('#9ACD32', 'black'), # Leaf Green
-        'WORKFAIL': ('#FF8C00', 'white'), # Dark Orange
-        'KENDALA_ERROR': ('#FFDAB9', 'black'), # Light Orange
-        'STARTWORK': ('#FFFACD', 'black'), # Yellow (LemonChiffon)
-        'CANCLWORK': ('#DC143C', 'white'), # Red (Crimson)
+        'COMPWORK': ('#556B2F', 'Moss Green'), # Moss Green
+        'ACOMP': ('#9ACD32', 'Leaf Green'), # Leaf Green (YellowGreen for better readability)
+        'VALCOMP': ('#9ACD32', 'Leaf Green'), # Leaf Green
+        'VALSTART': ('#9ACD32', 'Leaf Green'), # Leaf Green
+        'WORKFAIL': ('#FF8C00', 'Dark Orange'), # Dark Orange
+        'KENDALA_ERROR': ('#FFDAB9', 'Light Orange'), # Light Orange
+        'STARTWORK': ('#FFFACD', 'Yellow'), # Yellow (LemonChiffon)
+        'CANCLWORK': ('#DC143C', 'Red'), # Red (Crimson)
         'Total': ('#F5F5F5', 'black')
     }
     
