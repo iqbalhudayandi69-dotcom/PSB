@@ -94,7 +94,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD GAMBAR ---
+# --- FUNGSI PEMBUATAN DASHBOARD GAMBAR (DENGAN PERBAIKAN) ---
 def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     """
     Membuat dashboard visual hierarkis yang dipercantik dengan skema warna spesifik.
@@ -109,7 +109,7 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
     # Konstruksi DataFrame Hierarkis
     for status in status_order:
         status_df = daily_df[daily_df['STATUS'] == status]
-        if status_df.empty: continue
+        if status_df.empty and status != 'WORKFAIL': continue
 
         row_data = {'KATEGORI': status}; [row_data.update({sto: len(status_df[status_df['STO'] == sto])}) for sto in stos]
         table_data.append(row_data); row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
@@ -145,7 +145,7 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
     table = ax.table(cellText=[['']*len(display_df.columns)]*len(display_df), colLabels=['KATEGORI'] + stos + ['Grand Total'], loc='center', cellLoc='center')
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 1.8)
 
-    # --- Styling dengan Skema Warna Spesifik ---
+    # --- PERBAIKAN: Styling dengan metode yang benar ---
     color_map = {
         'COMPWORK': ('#4CAF50', 'white'), 'ACOMP': ('#C8E6C9', 'black'), 'VALCOMP': ('#C8E6C9', 'black'), 'VALSTART': ('#C8E6C9', 'black'),
         'WORKFAIL': ('#FF9800', 'white'), 'KENDALA_ERROR': ('#FFE0B2', 'black'), 'STARTWORK': ('#FFFDE7', 'black'),
@@ -153,13 +153,23 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
     }
 
     for (row_idx, col_idx), cell in table.get_celld().items():
-        cell.set_edgecolor('none')
+        # Menghapus semua garis tepi
+        cell.set_linewidth(0)
+
+        # Header
         if row_idx == 0:
             cell.set_facecolor('#2F3E46'); cell.set_text_props(color='white', weight='bold')
+            # Menambahkan garis bawah tebal untuk header
+            cell.visible_edges = 'B'
+            cell.set_edgecolor('white')
+            cell.set_linewidth(1.5)
             continue
         
-        cell.add_patch(plt.Rectangle((0, 0), 1, 0.01, facecolor='#E0E0E0', transform=cell.get_transform(), zorder=10))
-        
+        # Menambahkan garis horizontal tipis di atas setiap baris data
+        cell.visible_edges = 'T'
+        cell.set_edgecolor('#E0E0E0')
+        cell.set_linewidth(0.8)
+
         style = row_styles.get(row_idx - 1, {})
         data_row = display_df.iloc[row_idx-1]
         
@@ -199,8 +209,7 @@ def create_summary_text(daily_df: pd.DataFrame) -> str:
     def get_count(s): return status_counts.get(s, 0)
 
     ps = get_count('COMPWORK')
-    # Menggunakan ACOMP untuk metrik ACOM karena ACTCOMP tidak ada di daftar status
-    acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
+    acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP') # Menggunakan ACOMP, bukan ACTCOMP
     pi = get_count('STARTWORK')
     pi_progress = get_count('INTSCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
     kendala = get_count('WORKFAIL')
