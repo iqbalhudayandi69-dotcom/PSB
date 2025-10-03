@@ -74,7 +74,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         latest_date = df['STATUSDATE'].dt.date.max()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date].copy()
         
-        # PERBAIKAN: Hitung status counts sekali saja
+        # Hitung status counts sekali untuk konsistensi
         status_counts = daily_df['STATUS'].value_counts()
         
         image_buffer = create_integrated_dashboard(daily_df, latest_date, status_counts) 
@@ -86,58 +86,63 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD TERINTEGRASI (LOGIKA TERPUSAT) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (LOGIKA AKURASI BARU) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
-    status_order = ['CANCLWORK', 'COMPWORK', 'STARTWORK', 'WORKFAIL', 'ACOMP', 'VALCOMP', 'VALSTART', 'INTSCOMP', 'PENDWORK', 'CONTWORK']
+    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
     
+    # PERBAIKAN: Loop melalui semua status yang ditentukan
     for status in status_order:
         status_df = daily_df[daily_df['STATUS'] == status]
         
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
-        # Tampilkan baris jika Grand Total-nya > 0 atau jika itu WORKFAIL (bahkan jika 0)
-        if sum(list(row_data.values())[1:]) > 0 or status == 'WORKFAIL':
+        # Hanya tampilkan baris jika Grand Total-nya > 0
+        if sum(list(row_data.values())[1:]) > 0:
             table_data.append(row_data)
             row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
         if status == 'WORKFAIL':
-            for error_code, error_group in status_df.groupby('ERRORCODE'):
-                if error_code in ['NAN', 'N/A']: continue
-                error_row = {'KATEGORI': f"  ↳ {error_code}"}
-                for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
-                table_data.append(error_row)
-                row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
+            # Jika WORKFAIL > 0, tampilkan turunannya
+            if not status_df.empty:
+                for error_code, error_group in status_df.groupby('ERRORCODE'):
+                    if error_code in ['NAN', 'N/A']: continue
+                    error_row = {'KATEGORI': f"  ↳ {error_code}"}
+                    for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
+                    table_data.append(error_row)
+                    row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
 
-                for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
-                    if sub_error_code in ['NAN', 'N/A']: continue
-                    sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
-                    for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
-                    if sum(list(sub_error_row.values())[1:]) > 0:
-                        table_data.append(sub_error_row)
-                        row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
+                    for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
+                        if sub_error_code in ['NAN', 'N/A']: continue
+                        sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
+                        for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
+                        if sum(list(sub_error_row.values())[1:]) > 0:
+                            table_data.append(sub_error_row)
+                            row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
     if not table_data: return create_empty_dashboard(report_date)
 
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
-    # PERBAIKAN: Grand Total dihitung dari data sumber, bukan dari tabel yang mungkin tidak lengkap
-    grand_total_source = daily_df[daily_df['STATUS'].isin(display_df['KATEGORI'].unique())]
+    # PERBAIKAN: Hitung Grand Total dari data sumber yang relevan
+    relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles[table_data.index(row)]['level'] == 1]
+    total_source_df = daily_df[daily_df['STATUS'].isin(relevant_statuses)]
+    
     grand_total_row = {'KATEGORI': 'Grand Total'}
     for sto in stos:
-        grand_total_row[sto] = len(grand_total_source[grand_total_source['STO'] == sto])
-    grand_total_row['Grand Total'] = sum(list(grand_total_row.values())[1:])
-    
+        grand_total_row[sto] = len(total_source_df[total_source_df['STO'] == sto])
+    grand_total_row['Grand Total'] = len(total_source_df)
+
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # --- 2. Perhitungan Teks Ringkasan (dari status_counts) ---
+    # --- 2. Perhitungan Teks Ringkasan ---
     summary_text = create_summary_text(status_counts)
 
     # --- 3. Visualisasi ---
@@ -151,18 +156,15 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    # Render Judul
     report_time = datetime.now().strftime('%H:%M:%S')
     ax_title.text(0.05, 0.95, f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
-    # Render Tabel
     col_widths = [0.35] + [0.08] * (len(stos) + 1)
     table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
                            loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # Styling
     color_map = {'COMPWORK': '#F0FFF0', 'WORKFAIL': '#FFFFE0', 'Total': '#F5F5F5'}
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor('#D3D3D3'); cell.set_linewidth(0.8)
@@ -180,7 +182,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
             cell.get_text().set_text(data_row.iloc[col_idx])
             cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
     
-    # Render Teks Ringkasan di Footer
     ax_text.text(0.05, 0.9, summary_text, ha='left', va='top', fontsize=10, family='monospace')
     
     plt.tight_layout()
@@ -189,7 +190,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     return image_buffer
 
 def create_summary_text(status_counts: pd.Series) -> str:
-    # PERBAIKAN: Fungsi ini sekarang menerima status_counts yang sudah dihitung
     def get_count(s): return status_counts.get(s, 0)
     
     ps = get_count('COMPWORK')
@@ -211,7 +211,6 @@ def create_summary_text(status_counts: pd.Series) -> str:
     )
 
 def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
-    # (Fungsi ini tidak berubah)
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
     report_time = datetime.now().strftime('%H:%M:%S')
