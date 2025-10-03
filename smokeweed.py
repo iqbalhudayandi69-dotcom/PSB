@@ -77,7 +77,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         status_counts = daily_df['STATUS'].value_counts()
         
         image_buffer = create_integrated_dashboard(daily_df, latest_date, status_counts) 
-        caption = f"Laporan Harian (Terupdate) - {latest_date.strftime('%d %B %Y')}"
+        caption = f"REPORT DAILY ENSTADE JAKPUS) - {latest_date.strftime('%d %B %Y')}"
         await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
     except Exception as e:
@@ -85,12 +85,11 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN SKEMA WARNA BARU) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN PEWARNAAN BARU) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
-    # PERBAIKAN: Urutan status diperbarui sesuai permintaan
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
@@ -126,7 +125,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
-    # Hitung Grand Total dari sumber yang akurat
     relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles[table_data.index(row)]['level'] == 1]
     total_source_df = daily_df[daily_df['STATUS'].isin(relevant_statuses)]
     grand_total_row = {'KATEGORI': 'Grand Total'}
@@ -159,7 +157,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.da
                            loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # PERBAIKAN: Skema warna baru
+    # PERBAIKAN: Skema warna baru yang spesifik
     color_map = {
         'COMPWORK': ('#556B2F', 'white'), # Moss Green
         'ACOMP': ('#9ACD32', 'black'),   # Leaf Green
