@@ -1,4 +1,4 @@
-python-telegram-bot
+python-telegram-bot[callback-data]
 pandas
 matplotlib
 seaborn
@@ -6,4 +6,4 @@ openpyxl
 xlrd
 fastapi
 uvicorn
-python-telegram-bot[callback-data]
+
