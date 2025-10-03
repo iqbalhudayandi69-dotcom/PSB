@@ -64,9 +64,9 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
             
-        # Pembersihan spasi otomatis
+        # Pembersihan spasi otomatis dan konversi ke uppercase untuk konsistensi
         for col in ['STO', 'STATUS', 'ERRORCODE', 'SUBERRORCODE']:
-            df[col] = df[col].astype(str).str.strip().str.upper() # Strip spasi dan UPPERCASE
+            df[col] = df[col].astype(str).str.strip().str.upper()
 
         df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
         df.dropna(subset=['STATUSDATE'], inplace=True)
@@ -109,7 +109,7 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
     # Konstruksi DataFrame Hierarkis
     for status in status_order:
         status_df = daily_df[daily_df['STATUS'] == status]
-        if status_df.empty and status != 'WORKFAIL': continue
+        if status_df.empty: continue
 
         row_data = {'KATEGORI': status}; [row_data.update({sto: len(status_df[status_df['STO'] == sto])}) for sto in stos]
         table_data.append(row_data); row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
@@ -148,7 +148,7 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
     # --- Styling dengan Skema Warna Spesifik ---
     color_map = {
         'COMPWORK': ('#4CAF50', 'white'), 'ACOMP': ('#C8E6C9', 'black'), 'VALCOMP': ('#C8E6C9', 'black'), 'VALSTART': ('#C8E6C9', 'black'),
-        'WORKFAIL': ('#FF9800', 'white'), 'KENDALA_ERROR': ('#FFE0B2', 'black'), 'STARTWORK': ('#FFF9C4', 'black'),
+        'WORKFAIL': ('#FF9800', 'white'), 'KENDALA_ERROR': ('#FFE0B2', 'black'), 'STARTWORK': ('#FFFDE7', 'black'),
         'CANCLWORK': ('#F44336', 'white'), 'Total': ('#F5F5F5', 'black')
     }
 
@@ -165,18 +165,17 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
         
         # Penentuan Warna
         bg_color, text_color = 'white', 'black'
-        status = style.get('status')
-        if style.get('level') == 2 and status == 'WORKFAIL': status = 'KENDALA_ERROR'
+        status_key = style.get('status')
+        if style.get('level') == 2 and status_key == 'WORKFAIL': status_key = 'KENDALA_ERROR'
         
-        if status in color_map: bg_color, text_color = color_map[status]
+        if status_key in color_map: bg_color, text_color = color_map[status_key]
         
         cell.set_facecolor(bg_color)
         cell.get_text().set_color(text_color)
 
-        # Teks & Data Bars
+        # Teks & Data
         if col_idx > 0:
-            text = str(data_row.iloc[col_idx])
-            numeric_value = pd.to_numeric(text, errors='coerce')
+            numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
             if pd.notna(numeric_value) and numeric_value > 0:
                 cell.get_text().set_text(f"{numeric_value:,.0f}")
             else: cell.get_text().set_text("")
@@ -186,24 +185,21 @@ def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.B
             cell.set_text_props(ha='left', va='center'); cell.PAD = 0.05
 
         # Font Styling
-        if style.get('level') in [0, 1]: cell.get_text().set_weight('bold')
-        if style.get('level') == 2: cell.get_text().set_weight('bold') # Errorcode juga bold
+        if style.get('level') in [0, 1, 2]: cell.get_text().set_weight('bold')
         if style.get('level') == 3: cell.get_text().set_style('italic')
         
     plt.tight_layout(rect=[0, 0, 1, 0.9])
     image_buffer = io.BytesIO()
-    plt.savefig(image_buffer, format='png', dpi=250)
-    image_buffer.seek(0); plt.close(fig)
+    plt.savefig(image_buffer, format='png', dpi=250); image_buffer.seek(0); plt.close(fig)
     return image_buffer
 
 # --- FUNGSI PEMBUATAN TEKS RINGKASAN ---
 def create_summary_text(daily_df: pd.DataFrame) -> str:
-    """Menghitung metrik dan membuat pesan teks ringkasan."""
     status_counts = daily_df['STATUS'].value_counts()
     def get_count(s): return status_counts.get(s, 0)
 
-    # Note: ACTCOMP tidak ada di daftar, asumsi ACOMP yang digunakan
     ps = get_count('COMPWORK')
+    # Menggunakan ACOMP untuk metrik ACOM karena ACTCOMP tidak ada di daftar status
     acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
     pi = get_count('STARTWORK')
     pi_progress = get_count('INTSCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
@@ -224,7 +220,6 @@ def create_summary_text(daily_df: pd.DataFrame) -> str:
     return summary
 
 def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
-    # (Fungsi ini tetap sama)
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
     fig.suptitle(f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
