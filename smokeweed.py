@@ -7,7 +7,7 @@ import io
 import os
 from fastapi import FastAPI, Request, Response
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 # Konfigurasi Logging
 logging.basicConfig(
@@ -36,10 +36,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Bot ini akan membuat satu gambar dashboard terintegrasi untuk tanggal paling akhir di file Excel Anda."
     )
 
-# --- FUNGSI HANDLE FILE (DENGAN PERBAIKAN LOGIKA TIMESTAMP) ---
+# --- FUNGSI HANDLE FILE (DENGAN PERBAIKAN LOGIKA TIMESTAMP FINAL) ---
 async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # PERBAIKAN: Catat waktu saat ini (waktu unggah) SEKARANG
-    upload_timestamp = datetime.now()
+    # --- PERBAIKAN FINAL: Ambil timestamp dari pesan dan konversi ke WIB (UTC+7) ---
+    upload_timestamp_utc = update.message.date
+    wib_tz = timezone(timedelta(hours=7))
+    upload_timestamp_wib = upload_timestamp_utc.astimezone(wib_tz)
     
     document = update.message.document
     
@@ -75,17 +77,16 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("Tidak ditemukan data dengan tanggal valid di kolom STATUSDATE.")
             return
             
-        # Logika Inti: Temukan tanggal terakhir HANYA untuk filter data
         latest_date_in_file = df['STATUSDATE'].dt.date.max()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date_in_file].copy()
         
         status_counts = daily_df['STATUS'].value_counts()
         
-        # PERBAIKAN: Kirim timestamp UNGGAH (upload_timestamp) ke fungsi dashboard untuk judul
-        image_buffer = create_integrated_dashboard(daily_df, upload_timestamp, status_counts) 
+        # Kirim timestamp WIB yang sudah benar ke fungsi dashboard
+        image_buffer = create_integrated_dashboard(daily_df, upload_timestamp_wib, status_counts) 
         
-        caption = f"REPORT DAILY ENDSTATE JAKPUS - {upload_timestamp.strftime('%d %B %Y')}"
-        await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{upload_timestamp.strftime('%Y-%m-%d')}.png"), caption=caption)
+        caption = f"REPORT DAILY ENDSTATE JAKPUS - {upload_timestamp_wib.strftime('%d %B %Y')}"
+        await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{upload_timestamp_wib.strftime('%Y-%m-%d')}.png"), caption=caption)
 
     except Exception as e:
         logger.error(f"Error processing file: {e}", exc_info=True)
@@ -158,7 +159,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    # PERBAIKAN: Menggunakan timestamp unggah (report_timestamp) untuk judul
+    # Menggunakan timestamp unggah (report_timestamp) yang sudah dikonversi untuk judul
     ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
@@ -221,7 +222,7 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"PS (COMPWORK)                 = {ps}\n"
         f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
         f"PI (STARTWORK)                  = {pi}\n"
-        f"PI PROGRESS (INSTCOMP+CONTWORK+PENDWORK) = {pi_progress}\n"
+        f"PI PROGRESS (INSTCOMP+PENDWORK+CONTWORK) = {pi_progress}\n"
         f"KENDALA (WORKFAIL)              = {kendala}\n"
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
