@@ -71,18 +71,13 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("Tidak ditemukan data dengan tanggal valid di kolom STATUSDATE.")
             return
             
-        # PERBAIKAN: Ambil timestamp lengkap yang paling akhir
-        latest_timestamp = df['STATUSDATE'].max()
-        
-        # Filter DataFrame berdasarkan tanggal dari timestamp tersebut
-        latest_date = latest_timestamp.date()
+        latest_date = df['STATUSDATE'].dt.date.max()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date].copy()
         
         status_counts = daily_df['STATUS'].value_counts()
         
-        # Kirim timestamp lengkap ke fungsi dashboard
-        image_buffer = create_integrated_dashboard(daily_df, latest_timestamp, status_counts) 
-        caption = f"REPORT DAILY ENDSTATE JAKPUS - {latest_timestamp.strftime('%d %B %Y')}"
+        image_buffer = create_integrated_dashboard(daily_df, latest_date, status_counts) 
+        caption = f"Laporan Harian (Terupdate) - {latest_date.strftime('%d %B %Y')}"
         await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{latest_date}.png"), caption=caption)
 
     except Exception as e:
@@ -90,30 +85,27 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN PERBAIKAN FINAL) ---
-def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
+# --- FUNGSI PEMBUATAN DASHBOARD (DENGAN SKEMA WARNA BARU) ---
+def create_integrated_dashboard(daily_df: pd.DataFrame, report_date: datetime.date, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
-    # PERBAIKAN: Mengubah INTSCOMP menjadi INSTCOMP
-    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
+    # PERBAIKAN: Urutan status diperbarui sesuai permintaan
+    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INTSCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
     
-    unique_statuses_in_data = daily_df['STATUS'].unique()
-    
     for status in status_order:
-        if status not in unique_statuses_in_data: continue
-            
         status_df = daily_df[daily_df['STATUS'] == status]
         
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
-        table_data.append(row_data)
-        row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
+        if sum(list(row_data.values())[1:]) > 0 or status == 'WORKFAIL':
+            table_data.append(row_data)
+            row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
-        if status == 'WORKFAIL':
+        if status == 'WORKFAIL' and not status_df.empty:
             for error_code, error_group in status_df.groupby('ERRORCODE'):
                 if error_code in ['NAN', 'N/A']: continue
                 error_row = {'KATEGORI': f"  ↳ {error_code}"}
@@ -129,12 +121,12 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
                         table_data.append(sub_error_row)
                         row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
-    if not table_data: return create_empty_dashboard(report_timestamp)
+    if not table_data: return create_empty_dashboard(report_date)
 
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
-    relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles.get(table_data.index(row), {}).get('level') == 1]
+    relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles[table_data.index(row)]['level'] == 1]
     total_source_df = daily_df[daily_df['STATUS'].isin(relevant_statuses)]
     grand_total_row = {'KATEGORI': 'Grand Total'}
     for sto in stos: grand_total_row[sto] = len(total_source_df[total_source_df['STO'] == sto])
@@ -157,8 +149,8 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    # PERBAIKAN: Menggunakan timestamp lengkap untuk judul
-    ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
+    report_time = datetime.now().strftime('%H:%M:%S')
+    ax_title.text(0.05, 0.95, f"LAPORAN HARIAN (TERUPDATE) - {report_date.strftime('%d %B %Y').upper()} {report_time}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
     col_widths = [0.35] + [0.08] * (len(stos) + 1)
@@ -166,10 +158,17 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
                            loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
+    # PERBAIKAN: Skema warna baru
     color_map = {
-        'COMPWORK': ('#556B2F', 'white'), 'ACOMP': ('#9ACD32', 'black'), 'VALCOMP': ('#9ACD32', 'black'), 
-        'VALSTART': ('#9ACD32', 'black'), 'WORKFAIL': ('#FF8C00', 'white'), 'KENDALA_ERROR': ('#FFDAB9', 'black'), 
-        'STARTWORK': ('#FFFACD', 'black'), 'CANCLWORK': ('#DC143C', 'white'), 'Total': ('#F5F5F5', 'black')
+        'COMPWORK': ('#556B2F', 'white'), # Moss Green
+        'ACOMP': ('#9ACD32', 'black'),   # Leaf Green
+        'VALCOMP': ('#9ACD32', 'black'),  # Leaf Green
+        'VALSTART': ('#9ACD32', 'black'),# Leaf Green
+        'WORKFAIL': ('#FF8C00', 'white'), # Dark Orange
+        'KENDALA_ERROR': ('#FFDAB9', 'black'), # Light Orange
+        'STARTWORK': ('#FFFACD', 'black'),  # Yellow
+        'CANCLWORK': ('#DC143C', 'white'), # Red
+        'Total': ('#F5F5F5', 'black')
     }
     
     for (row_idx, col_idx), cell in table.get_celld().items():
@@ -205,13 +204,13 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     return image_buffer
 
 def create_summary_text(status_counts: pd.Series) -> str:
+    # (Fungsi ini tidak berubah)
     def get_count(s): return status_counts.get(s, 0)
     
     ps = get_count('COMPWORK')
     acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
     pi = get_count('STARTWORK')
-    # PERBAIKAN: Mengubah INTSCOMP menjadi INSTCOMP
-    pi_progress = get_count('INSTCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
+    pi_progress = get_count('INTSCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
     kendala = get_count('WORKFAIL')
     est_ps = ps + acom
 
@@ -226,10 +225,12 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
 
-def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
+def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
+    # (Fungsi ini tidak berubah)
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
-    fig.suptitle(f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", fontsize=16, weight='bold')
+    report_time = datetime.now().strftime('%H:%M:%S')
+    fig.suptitle(f"Laporan Harian (Terupdate) - {report_date.strftime('%d %B %Y').upper()} {report_time}", fontsize=16, weight='bold')
     ax.text(0.5, 0.5, "Tidak ada data untuk status yang relevan pada tanggal ini.", ha='center', va='center', fontsize=12, wrap=True)
     plt.tight_layout()
     image_buffer = io.BytesIO()
@@ -242,6 +243,21 @@ def setup_handlers(application: Application):
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_excel_file))
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting up FastAPI application...")
+    setup_handlers(ptb_application)
+    await ptb_application.initialize(); await ptb_application.start()
+    full_webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+    await ptb_application.bot.set_webhook(url=full_webhook_url)
+    logger.info(f"Webhook set to {full_webhook_url}")
+    yield 
+    logger.info("Shutting down FastAPI application..."); await ptb_application.stop(); await ptb_application.shutdown()
+
+app = FastAPI(docs_url=None, redoc_url=None, lifespan=lifespan)
+
+@app.get("/")
+async def root(): return {"message": "Telegram Bot FastAPI is running!"}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up FastAPI application...")
