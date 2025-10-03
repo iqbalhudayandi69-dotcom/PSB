@@ -2,9 +2,12 @@ import logging
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from telegram import Update, InputFile
-from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
-import io # Untuk menyimpan gambar ke memori
+from telegram import Update, Bot, InputFile
+from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes, TypeHandler
+import io
+import os
+from fastapi import FastAPI, Request, Response
+from pydantic import BaseModel
 
 # Konfigurasi Logging
 logging.basicConfig(
@@ -12,7 +15,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Fungsi Utility ---
+# --- Konfigurasi Bot ---
+BOT_TOKEN = "8330450329:AAGEPd2j2a1dZ1PEJ7BrneykiZ-3Kv1T3LI"
+WEBHOOK_URL = "https://psbiqbal.onrender.com"
+WEBHOOK_PATH = "/telegram" # Path di mana FastAPI akan menerima update
+
+# Inisialisasi FastAPI
+app = FastAPI(docs_url=None, redoc_url=None) # Menonaktifkan docs default
+
+# Inisialisasi Application (python-telegram-bot)
+# Kita akan membuatnya sebagai global atau singleton
+ptb_application = (
+    Application.builder().token(BOT_TOKEN).arbitrary_callback_data(True).build()
+)
+
+# --- Fungsi Utility Bot ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Mengirim pesan sambutan saat perintah /start dipanggil."""
@@ -85,13 +102,9 @@ def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
     df_filtered = df[df['STATUS'].isin(target_statuses)].copy()
 
     # Agregasi data: Hitung jumlah SCORDERNO per STATUS per STATUSDATE (per hari)
-    # Anda menyebutkan "per STATUSDATE", jadi kita akan mengelompokkan per hari.
     df_filtered['STATUS_DATE_ONLY'] = df_filtered['STATUSDATE'].dt.date
     
     # Menghitung jumlah SCORDERNO unik per STATUS dan per tanggal
-    # Jika SCORDERNO bisa duplikat dan ingin dihitung sebagai satu entitas, gunakan .nunique()
-    # Jika setiap baris adalah entitas unik yang ingin dihitung, gunakan .size()
-    # Untuk kasus ini, saya asumsikan setiap baris SCORDERNO adalah unik yang dihitung.
     status_counts = df_filtered.groupby(['STATUS_DATE_ONLY', 'STATUS']).size().reset_index(name='Jumlah SCORDERNO')
 
     # Membuat pivot table untuk visualisasi yang lebih mudah
@@ -130,23 +143,54 @@ def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
     
     return image_buffer
 
-# --- Fungsi Main (untuk menjalankan bot) ---
-
-async def main() -> None:
-    """Fungsi utama untuk menjalankan bot."""
-    # Ganti 'YOUR_BOT_TOKEN' dengan token bot Telegram Anda
-    application = Application.builder().token("YOUR_BOT_TOKEN").build()
-
-    # Handler perintah
+# --- Setup Bot Handlers ---
+def setup_handlers(application: Application):
     application.add_handler(CommandHandler("start", start))
-
-    # Handler pesan file (filter hanya untuk dokumen)
     application.add_handler(MessageHandler(filters.Document.ALL, handle_excel_file))
+    # Menambahkan error handler jika diperlukan
+    # application.add_error_handler(error_handler)
 
-    # Jalankan bot sampai Ctrl-C ditekan
-    logger.info("Bot dimulai...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+# --- FastAPI Endpoints ---
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Starting up...")
+    setup_handlers(ptb_application)
+    # Mulai prosesing update secara async (tanpa polling)
+    ptb_application.updater = None # Memastikan updater tidak berjalan di mode polling
+    await ptb_application.start()
+    
+    # Menyiapkan webhook di Telegram
+    # Pastikan URL_WEBHOOK_PATH_DI_SERVER = WEBHOOK_URL + WEBHOOK_PATH
+    await ptb_application.bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+    logger.info(f"Webhook set to {WEBHOOK_URL}{WEBHOOK_PATH}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Shutting down...")
+    await ptb_application.stop()
+    await ptb_application.shutdown()
+    # Opsional: Hapus webhook saat shutdown
+    # await ptb_application.bot.delete_webhook()
+    logger.info("Webhook deleted and application stopped.")
+
+@app.get("/")
+async def root():
+    return {"message": "Telegram Bot FastAPI is running!"}
+
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(request: Request):
+    """Menerima update dari Telegram dan meneruskannya ke python-telegram-bot."""
+    try:
+        # Mendapatkan body request sebagai JSON
+        json_data = await request.json()
+        
+        # Meneruskan update ke Application python-telegram-bot
+        # ptb_application.update_queue.put_nowait(Update.de_json(json_data, ptb_application.bot)) # V20
+        # Di PTB v20, proses_update menggunakan objek Update langsung
+        update = Update.de_json(json_data, ptb_application.bot)
+        await ptb_application.process_update(update)
+
+        return Response(status_code=200)
+    except Exception as e:
+        logger.error(f"Error processing
