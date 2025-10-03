@@ -8,7 +8,6 @@ import os
 from fastapi import FastAPI, Request, Response
 from contextlib import asynccontextmanager
 from datetime import datetime
-import numpy as np
 
 # Konfigurasi Logging
 logging.basicConfig(
@@ -29,15 +28,13 @@ ptb_application = (
 # --- Fungsi Utility Bot ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Halo! Kirimkan file Excel (.xls atau .xlsx) Anda, dan saya akan membuatkan dashboard."
+        "Halo! Kirimkan file Excel (.xls atau .xlsx) Anda, dan saya akan membuatkan dashboard harian."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Saya adalah bot pembuat dashboard Excel. "
-        "Cukup kirimkan saya file Excel (.xls atau .xlsx) dengan header utama seperti 'SCORDERNO', 'STATUS', dll., "
-        "dan saya akan membuatkan dashboard visual untuk Anda."
-        "\n\nPerintah yang tersedia:\n/start - Memulai interaksi\n/help - Menampilkan pesan bantuan ini"
+        "Bot ini akan membuat gambar dashboard untuk setiap tanggal yang ada di file Excel Anda.\n\n"
+        "Dashboard akan menampilkan ringkasan STATUS vs STO, dengan rincian ERRORCODE untuk WORKFAIL."
     )
 
 async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -47,7 +44,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("Mohon unggah file dengan format .xls atau .xlsx.")
         return
 
-    await update.message.reply_text("Menerima file Anda, sedang memproses...")
+    await update.message.reply_text("Menerima file Anda, sedang memproses semua tanggal...")
 
     try:
         file_id = document.file_id
@@ -59,8 +56,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         df = pd.read_excel(file_buffer)
 
-        required_headers = ['SCORDERNO', 'DATEL LAMA', 'STO', 'DATECREATED', 'STATUSDATE', 
-                            'STATUS', 'ERRORCODE', 'SUBERRORCODE', 'TGL_MANJA', 'WORKFAIL']
+        required_headers = ['SCORDERNO', 'STO', 'STATUSDATE', 'STATUS', 'ERRORCODE']
         
         missing_headers = [header for header in required_headers if header not in df.columns]
         if missing_headers:
@@ -69,163 +65,144 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return
 
-        image_buffer = create_dashboard(df) 
+        # --- LOGIKA INTI: FLAGGING STATUSDATE ---
+        df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
+        df.dropna(subset=['STATUSDATE'], inplace=True)
+        df['DATE_ONLY'] = df['STATUSDATE'].dt.date
         
-        await update.message.reply_photo(photo=InputFile(image_buffer, filename="dashboard.png"))
-        await update.message.reply_text("Dashboard Anda siap!")
+        unique_dates = sorted(df['DATE_ONLY'].unique())
+
+        if not unique_dates:
+            await update.message.reply_text("Tidak ditemukan data dengan tanggal yang valid di kolom STATUSDATE.")
+            return
+
+        await update.message.reply_text(f"Ditemukan data untuk {len(unique_dates)} tanggal. Membuat dashboard untuk masing-masing...")
+
+        for report_date in unique_dates:
+            daily_df = df[df['DATE_ONLY'] == report_date].copy()
+            image_buffer = create_dashboard(daily_df, report_date) 
+            
+            # Mengirim caption dengan tanggal laporan
+            caption = f"Dashboard untuk tanggal {report_date.strftime('%d %B %Y')}"
+            await update.message.reply_photo(photo=InputFile(image_buffer, filename=f"dashboard_{report_date}.png"), caption=caption)
 
     except Exception as e:
         logger.error(f"Error processing file: {e}", exc_info=True)
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI create_dashboard BARU UNTUK FORMAT GAMBAR SPESIFIK ---
-def create_dashboard(df: pd.DataFrame) -> io.BytesIO:
+# --- FUNGSI create_dashboard BARU DENGAN DESAIN YANG DIPERBAIKI ---
+def create_dashboard(daily_df: pd.DataFrame, report_date: datetime.date) -> io.BytesIO:
     """
-    Membuat dashboard visual yang meniru format gambar yang diberikan.
+    Membuat dashboard visual hierarkis yang dipercantik untuk satu hari.
     """
     
-    # --- 1. Persiapan Data ---
+    # Persiapan Data
     for col in ['STO', 'STATUS', 'ERRORCODE']:
-        if col not in df.columns: df[col] = 'N/A'
-        df[col] = df[col].fillna('N/A').astype(str)
+        if col not in daily_df.columns: daily_df[col] = 'N/A'
+        daily_df[col] = daily_df[col].fillna('N/A').astype(str)
 
-    # Dapatkan daftar STO unik dari data, diurutkan
-    stos = sorted(df['STO'].unique())
+    stos = sorted(daily_df['STO'].unique())
     
-    # Definisikan struktur hierarki KET_ORDER
-    ket_order_structure = {
-        'CANCLWORK': [], 'COMPWORK': [], 'INSTCOMP': [], 'STARTWORK': [],
-        'WORKFAIL': {
-            'KENDALA PELANGGAN': [
-                "ALAMAT TIDAK DITEMUKAN", "BATAL", "INDIKASI CABUT PASANG",
-                "KENDALA IZIN", "PENDING", "SALAH TAGGING",
-            ],
-            'KENDALA TEKNIK': [
-                "KENDALA IKR/IKG", "ODP JAUH", "ODP RETI"
-            ]
-        }
-    }
-    
-    # --- 2. Bangun DataFrame untuk Ditampilkan ---
+    # Urutan status yang diinginkan
+    status_order = ['ACOMP', 'STARTWORK', 'INTSCOMP', 'WORKFAIL', 'VALCOMP', 'VALSTART', 'CANCELWORK', 'COMPWORK']
+
     table_data = []
-    row_styles = {} # Untuk menyimpan info styling
+    row_styles = {} # Menyimpan info styling per baris
     
-    for ket, sub_ket in ket_order_structure.items():
-        # Baris level 1 (STATUS)
-        row_data = {'KET_ORDER': ket}
-        
-        if not sub_ket: # Jika tidak punya sub-kategori
-            filtered_df = df[df['STATUS'] == ket]
-            for sto in stos:
-                row_data[sto] = len(filtered_df[filtered_df['STO'] == sto])
-            table_data.append(row_data)
-            row_styles[len(table_data)-1] = {'level': 1, 'color': ket}
-        else: # Jika punya sub-kategori (kasus WORKFAIL)
-            # Baris header grup
-            workfail_df = df[df['STATUS'] == ket]
-            for sto in stos:
-                row_data[sto] = len(workfail_df[workfail_df['STO'] == sto])
-            table_data.append(row_data)
-            row_styles[len(table_data)-1] = {'level': 1, 'color': ket}
+    for status in status_order:
+        status_df = daily_df[daily_df['STATUS'] == status]
+        if status_df.empty: continue # Lewati status jika tidak ada datanya
 
-            # Sub-grup (KENDALA PELANGGAN, KENDALA TEKNIK)
-            for sub_group_name, error_codes in sub_ket.items():
-                sub_group_df = workfail_df[workfail_df['ERRORCODE'].isin(error_codes)]
-                sub_group_row = {'KET_ORDER': f"  {sub_group_name}"}
+        # Baris STATUS utama
+        row_data = {'KATEGORI': status}
+        for sto in stos:
+            row_data[sto] = len(status_df[status_df['STO'] == sto])
+        table_data.append(row_data)
+        row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
+
+        # Logika Kondisional: Rincian untuk WORKFAIL
+        if status == 'WORKFAIL':
+            error_counts = status_df.groupby('ERRORCODE').size()
+            for error_code, count in error_counts.items():
+                error_row = {'KATEGORI': f"  ↳ {error_code}"}
+                error_df = status_df[status_df['ERRORCODE'] == error_code]
                 for sto in stos:
-                    sub_group_row[sto] = len(sub_group_df[sub_group_df['STO'] == sto])
-                table_data.append(sub_group_row)
-                row_styles[len(table_data)-1] = {'level': 2, 'color': ket}
-                
-                # Rincian error code
-                for error_code in error_codes:
-                    error_df = workfail_df[workfail_df['ERRORCODE'] == error_code]
-                    error_row = {'KET_ORDER': f"    {error_code}"}
-                    for sto in stos:
-                        error_row[sto] = len(error_df[error_df['STO'] == sto])
-                    if sum(list(error_row.values())[1:]) > 0: # Hanya tampilkan jika ada data
-                        table_data.append(error_row)
-                        row_styles[len(table_data)-1] = {'level': 3, 'color': ket}
+                    error_row[sto] = len(error_df[error_df['STO'] == sto])
+                table_data.append(error_row)
+                row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
 
-    display_df = pd.DataFrame(table_data).replace(0, '') # Ganti 0 dengan string kosong
-    display_df['Grand Total'] = display_df[stos].replace('', 0).sum(axis=1)
+    if not table_data: # Jika tidak ada data sama sekali untuk status yang dicari
+        return create_empty_dashboard(report_date)
 
-    # Tambah baris Grand Total
-    grand_total_row = display_df[stos + ['Grand Total']].replace('', 0).sum().to_dict()
-    grand_total_row['KET_ORDER'] = 'Grand Total'
+    display_df = pd.DataFrame(table_data)
+    display_df['Grand Total'] = display_df[stos].sum(axis=1)
+
+    grand_total_row = display_df[stos + ['Grand Total']].sum().to_dict()
+    grand_total_row['KATEGORI'] = 'Grand Total'
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
-    row_styles[len(display_df)-1] = {'level': 0, 'color': 'Grand Total'}
+    row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # --- 3. Hitung Metrik Ringkasan ---
-    status_counts = df['STATUS'].value_counts()
-    def get_count(s): return status_counts.get(s, 0)
+    # Ganti 0 dengan string kosong untuk kebersihan visual
+    for sto in stos:
+        display_df[sto] = display_df[sto].apply(lambda x: '' if x == 0 else x)
+
+    # Visualisasi
+    fig_height = len(display_df) * 0.45 + 2.5
+    fig, ax = plt.subplots(figsize=(12, fig_height))
+    ax.axis('off')
     
-    ps = get_count('COMPWORK')
-    acom = get_count('ACTCOMP') + get_count('VALSTART') + get_count('VALCOMP')
-    pi = get_count('STARTWORK')
-    pi_progress = get_count('INSTCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
-    kendala = get_count('WORKFAIL')
-    est_ps = ps + acom
+    fig.suptitle(f"LAPORAN HARIAN - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
 
-    summary_text = (
-        f"PS (COMPWORK) = {ps}\n"
-        f"ACOM (ACTCOMP+VALSTART+VALCOMP) = {acom}\n"
-        f"PI (STARTWORK) = {pi}\n"
-        f"PI PROGRESS (INSTCOMP+CONTWORK+PENDWORK) = {pi_progress}\n"
-        f"KENDALA (WORKFAIL) = {kendala}\n"
-        f"EST PS (PS+ACOM) = {est_ps}\n\n"
-        f"Source : KPRO Fulfillment Endstate"
-    )
+    table = ax.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'],
+                      loc='center', cellLoc='center')
+    table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 1.8)
 
-    # --- 4. Visualisasi dengan Matplotlib ---
-    fig_height = len(display_df) * 0.4 + 4 # Tinggi dinamis + ruang untuk teks
-    fig = plt.figure(figsize=(10, fig_height))
-    gs = fig.add_gridspec(2, 1, height_ratios=[len(display_df), 7])
-    
-    ax_table = fig.add_subplot(gs[0])
-    ax_text = fig.add_subplot(gs[1])
-    ax_table.axis('off'); ax_text.axis('off')
+    # Styling Lanjutan
+    color_map = {'COMPWORK': '#E8F5E9', 'WORKFAIL': '#FFF9C4', 'Total': '#F5F5F5'}
+    for (row_idx, col_idx), cell in table.get_celld().items():
+        cell.set_edgecolor('#E0E0E0')
+        cell.set_height(0.05)
 
-    # Judul Utama
-    fig.suptitle(f"REPORT DAILY ENDSTATE {datetime.now().strftime('%d/%m/%Y %H.%M')}", fontsize=14, y=0.98)
-    
-    # Render Tabel
-    table = ax_table.table(
-        cellText=display_df.values, colLabels=['KET_ORDER'] + stos + ['Grand Total'],
-        loc='center', cellLoc='center'
-    )
-    table.auto_set_font_size(False); table.set_fontsize(9); table.scale(1, 1.5)
-
-    # Styling Tabel
-    color_map = {'COMPWORK': '#dff0d8', 'WORKFAIL': '#fcf8e3', 'Grand Total': '#d9edf7'}
-    for (row, col), cell in table.get_celld().items():
-        cell.set_edgecolor('black')
         # Header
-        if row == 0:
-            cell.set_facecolor('#d9edf7'); cell.set_text_props(weight='bold')
-            if col == 0: cell.set_text_props(ha='left', va='center')
-            else: cell.set_text_props(ha='center', va='center')
+        if row_idx == 0:
+            cell.set_facecolor('#424242'); cell.set_text_props(color='white', weight='bold')
             continue
-            
-        # Styling baris berdasarkan info yang disimpan
-        style_info = row_styles.get(row - 1, {})
-        bg_color = color_map.get(style_info.get('color'))
-        if bg_color: cell.set_facecolor(bg_color)
 
-        # Alignment & Bold
-        if col == 0: cell.set_text_props(ha='left', va='center')
-        if style_info.get('level') in [0, 2]: cell.set_text_props(weight='bold')
+        style = row_styles.get(row_idx - 1, {})
         
-        # Grand Total Column
-        if col == len(display_df.columns) - 1: cell.set_text_props(weight='bold')
+        # Warna Latar
+        bg_color = color_map.get(style.get('status'))
+        if bg_color: cell.set_facecolor(bg_color)
+            
+        # Teks
+        if col_idx == 0: # Kolom Kategori
+            cell.set_text_props(ha='left', va='center')
+            cell.PAD = 0.05 # Padding kiri
+        else:
+            cell.set_text_props(ha='center', va='center')
 
-    # Render Teks Ringkasan
-    ax_text.text(0.01, 0.9, summary_text, ha='left', va='top', fontsize=10, linespacing=1.5)
+        # Bold untuk Level 1 (STATUS) dan Level 0 (Total)
+        if style.get('level') in [0, 1]:
+            cell.set_text_props(weight='bold')
 
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     image_buffer = io.BytesIO()
     plt.savefig(image_buffer, format='png', dpi=200)
+    image_buffer.seek(0)
+    plt.close(fig)
+    return image_buffer
+
+def create_empty_dashboard(report_date: datetime.date) -> io.BytesIO:
+    """Membuat gambar placeholder jika tidak ada data."""
+    fig, ax = plt.subplots(figsize=(10, 3))
+    ax.axis('off')
+    fig.suptitle(f"LAPORAN HARIAN - {report_date.strftime('%d %B %Y').upper()}", fontsize=16, weight='bold')
+    ax.text(0.5, 0.5, "Tidak ada data untuk status yang relevan pada tanggal ini.", 
+            ha='center', va='center', fontsize=12, wrap=True)
+    plt.tight_layout(rect=[0, 0, 1, 0.9])
+    image_buffer = io.BytesIO()
+    plt.savefig(image_buffer, format='png', dpi=150)
     image_buffer.seek(0)
     plt.close(fig)
     return image_buffer
