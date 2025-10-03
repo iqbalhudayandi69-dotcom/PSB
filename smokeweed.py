@@ -141,6 +141,7 @@ async def lifespan(app: FastAPI):
     setup_handlers(ptb_application)
     
     ptb_application.updater = None 
+    await ptb_application.initialize()
     await ptb_application.start()
     
     full_webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
