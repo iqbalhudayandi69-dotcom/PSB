@@ -36,9 +36,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Bot ini akan membuat satu gambar dashboard terintegrasi untuk tanggal paling akhir di file Excel Anda."
     )
 
-# --- FUNGSI HANDLE FILE (DENGAN PERBAIKAN LOGIKA TIMESTAMP FINAL) ---
 async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # --- PERBAIKAN FINAL: Ambil timestamp dari pesan dan konversi ke WIB (UTC+7) ---
+    # Mengambil timestamp dari pesan dan konversi ke WIB (UTC+7)
     upload_timestamp_utc = update.message.date
     wib_tz = timezone(timedelta(hours=7))
     upload_timestamp_wib = upload_timestamp_utc.astimezone(wib_tz)
@@ -82,7 +81,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         status_counts = daily_df['STATUS'].value_counts()
         
-        # Kirim timestamp WIB yang sudah benar ke fungsi dashboard
+        # Mengirim timestamp unggah (WIB) ke fungsi dashboard untuk judul
         image_buffer = create_integrated_dashboard(daily_df, upload_timestamp_wib, status_counts) 
         
         caption = f"REPORT DAILY ENDSTATE JAKPUS - {upload_timestamp_wib.strftime('%d %B %Y')}"
@@ -93,7 +92,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD (Kode tidak berubah, hanya parameter yang diterima) ---
+# --- FUNGSI PEMBUATAN DASHBOARD TERINTEGRASI (FINAL) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
@@ -159,7 +158,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    # Menggunakan timestamp unggah (report_timestamp) yang sudah dikonversi untuk judul
     ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
@@ -222,7 +220,7 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"PS (COMPWORK)                 = {ps}\n"
         f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
         f"PI (STARTWORK)                  = {pi}\n"
-        f"PI PROGRESS (INSTCOMP+PENDWORK+CONTWORK) = {pi_progress}\n"
+        f"PI PROGRESS (INSTCOMP+...)      = {pi_progress}\n"
         f"KENDALA (WORKFAIL)              = {kendala}\n"
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
@@ -254,7 +252,7 @@ async def lifespan(app: FastAPI):
     yield 
     logger.info("Shutting down FastAPI application..."); await ptb_application.stop(); await ptb_application.shutdown()
 
-app = FastAPI(docs_url=None, redoc_url=None, lifespan=lifespan)
+app = FastAPI(docs_url=None, red_url=None, lifespan=lifespan)
 
 @app.get("/")
 async def root(): return {"message": "Telegram Bot FastAPI is running!"}
