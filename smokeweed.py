@@ -36,8 +36,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Bot ini akan membuat satu gambar dashboard terintegrasi untuk tanggal paling akhir di file Excel Anda."
     )
 
+# --- FUNGSI HANDLE FILE (DENGAN PERBAIKAN LOGIKA TIMESTAMP FINAL) ---
 async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Mengambil timestamp dari pesan dan konversi ke WIB (UTC+7)
+    # --- PERBAIKAN FINAL: Ambil timestamp dari pesan dan konversi ke WIB (UTC+7) ---
     upload_timestamp_utc = update.message.date
     wib_tz = timezone(timedelta(hours=7))
     upload_timestamp_wib = upload_timestamp_utc.astimezone(wib_tz)
@@ -81,7 +82,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         status_counts = daily_df['STATUS'].value_counts()
         
-        # Mengirim timestamp unggah (WIB) ke fungsi dashboard untuk judul
+        # Kirim timestamp WIB yang sudah benar ke fungsi dashboard
         image_buffer = create_integrated_dashboard(daily_df, upload_timestamp_wib, status_counts) 
         
         caption = f"REPORT DAILY ENDSTATE JAKPUS - {upload_timestamp_wib.strftime('%d %B %Y')}"
@@ -92,7 +93,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(f"Terjadi kesalahan saat memproses file Anda: {e}. Mohon coba lagi atau periksa format file.")
 
 
-# --- FUNGSI PEMBUATAN DASHBOARD TERINTEGRASI (FINAL DENGAN FREETEXT) ---
+# --- FUNGSI PEMBUATAN DASHBOARD (Kode tidak berubah, hanya parameter yang diterima) ---
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
     
     # --- 1. Persiapan Data & Konstruksi Tabel ---
@@ -147,19 +148,18 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     # --- 2. Perhitungan Teks Ringkasan ---
     summary_text = create_summary_text(status_counts)
 
-    # --- 3. Visualisasi dengan GridSpec ---
+    # --- 3. Visualisasi ---
     num_rows = len(display_df)
-    # PERBAIKAN: Menambah ruang untuk footer teks
-    fig_height = num_rows * 0.5 + 5 
+    fig_height = num_rows * 0.5 + 4.5
     
     fig = plt.figure(figsize=(12, fig_height))
-    # PERBAIKAN: Menyesuaikan rasio tinggi untuk mengakomodasi footer
     gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 5])
     
     ax_title = fig.add_subplot(gs[0]); ax_title.axis('off')
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
-    ax_text = fig.add_subplot(gs[2]); ax_text.axis('off') # Area untuk teks ringkasan
+    ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
+    # Menggunakan timestamp unggah (report_timestamp) yang sudah dikonversi untuk judul
     ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
@@ -199,7 +199,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         
         if style.get('level') == 3: cell.get_text().set_style('italic')
     
-    # PERBAIKAN: Render Teks Ringkasan di Footer
     ax_text.text(0.05, 0.9, summary_text, ha='left', va='top', fontsize=10, family='monospace')
     
     plt.tight_layout()
@@ -223,7 +222,7 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"PS (COMPWORK)                 = {ps}\n"
         f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
         f"PI (STARTWORK)                  = {pi}\n"
-        f"PI PROGRESS (INSTCOMP+...)      = {pi_progress}\n"
+        f"PI PROGRESS (INSTCOMP+PENDWORK+CONTWORK) = {pi_progress}\n"
         f"KENDALA (WORKFAIL)              = {kendala}\n"
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
