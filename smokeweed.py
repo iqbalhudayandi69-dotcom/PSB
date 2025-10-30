@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # --- Konfigurasi Bot ---
 BOT_TOKEN = "8330450329:AAGEPd2j2a1dZ1PEJ7BrneykiZ-3Kv1T3LI"
-WEBHOOK_URL = "https://psbiqbal.onrender.com"
+WEBHOOK_URL = "https://psbiqbal2.onrender.com"
 WEBHOOK_PATH = "/telegram" 
 
 # Inisialisasi Application
