@@ -38,12 +38,16 @@ WEBHOOK_PATH = "/telegram"
 # --- PENGATURAN GOOGLE SHEET ---
 ENABLE_GOOGLE_SHEETS = True
 
-# --- KREDENSIAL (FIXED DICTIONARY FORMAT) ---
+# --- KREDENSIAL ---
+# Masalah "Invalid Credentials" biasanya karena karakter \n tidak terbaca sbg baris baru.
+# Saya tambahkan .replace('\\n', '\n') di bawah untuk memperbaikinya otomatis.
+RAW_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC4qN8oPT0p2ovQ\n1KzlX1nvglftOpG7F6gKW72mukaVtYUdx6Vw0FZZk3f0CCGXkdbt2aPtuH5H3JEy\nDlJYDhS1yVl/AyyPrFZHdvvt8J2CWlGEJr4ke+fvWacix4U7/woXRK69TIuOIiKo\nI7Wyj1vhWzxRU6N+L7QRis4Etcc1pbzWwFNuFYaW4vm8YxWrvV8+TOJ76DlZix8Y\nGljabsuq1sVmVggjr2o7+5sRu7BSbPoRbvrTKGmDbEFL1KOcv0OVrkJp1nofFnlb\nIHiG92gYQXubU1qaV5ujTZDs39slcwjyl0JjV6iTAmQX8VsAwFZo46hdJHm/Q93g\nk4Fwldj3AgMBAAECggEAAdOIaCVO57flyRoetE1gnin2WlN0IdsRNOUFDP3ro8sT\nTCDvhcbxtloV23Usdot2ijdW/otkEwGJ8r+fLd1vHqslS53JljQt+EVOJuN0fgJh\nqwJtFVRKY3IfYTctnf3Jk5hWIsDRN9smPO55e2YdPQSCJgsYjgTFGE/8oKGhnOoI\nlUAzrQ3GQvysyxFXCHINGUC2kLxzK3i244ApozUzUZ0z40mBcGfg8DNa4j4SNohD\n0nud+piFI489v5uN4EX9RdmPRr/SEWBChZ/iYLDgXYdU2cDyx+hnXWSiugycWLZi\nPXAEXzhoENrCsp5B1AjhmPG0T7LjAj721lHeEtOLaQKBgQDakx5wic47Q0V7L1fb\n8Fuic39+vCw94DEaPvRJH1LEtf1xmulkse4zFUWQC2AOJFw4ptp+7/zoXPOwkWJi\nX9SFGXm4sNihXhwfewW/Iy6w/RioCAZ3+6CC5eC6z6JxzCQCM2+8cFmxJNii6By6\njjq67Hcregi09pwBpyjPb6OoPwKBgQDYRyPsRRA0UM9HwMv9+u/n2r2pviYAHOku\nbn06LKifWkeFPAez3sUYUCHEnhs07r+26vdODcKdny26+6B4u2xWrJaR5Q6jjdUz\nBHpNu8KBXPlpwh3fDmp/k1yYfkRMdHhRh9MC3DzZgfrMsEa5vb6xV/ffqlp8QZcK\nps5EdRVhSQKBgBkwtWRg7Wy1Dw/oX+bQJ69sQjhX9X1YFjChKsQ2oPJcyw3JvbZG\nL16hx/eW6AYZOKuqxymz/ODGvasOxljyFGsWiYm4j+7hCrqyEfJ6Woo5URskeaJg\nVJphZeoBvgYBcfDy/qCoDh41UeZMe+sgMzKRyBYxpUk91rL2EeT+R80/AoGBAK/7\n2ygy3kejhba+E387xCCmJfRL7EHlRHxqnW1Lz32zCUVJnn7nAvuQoJmLiVnd95PQ\nx6D0o2p8jsp6W45B+5rfXrmiZ/H/w/56Y0aDRHbc/3nl4UaSRWg/sXXIMK0BjLHS\n0omeSck28avCuBoFYniNuv19cZlwCYY6Stb7aoU5AoGBALSPOapJbt4dspw0rLVN\neLF6tQW+Lcx36Bsb7VEmk/Mu28HlKmbtjyJa8dAPbNETXPQp5PpLKoOeTqAwApoM\nGY5RfG/fF+RWiTNEZW4+pLFmCmfOeAMNubRjiMQiFNclssZkeFYPeNsfSAMvYdhH\nsc9LMtN36jTejK+XSCNuERJQ\n-----END PRIVATE KEY-----\n"
+
 GOOGLE_CREDENTIALS_DICT = {
   "type": "service_account",
   "project_id": "decisive-router-474406-n1",
   "private_key_id": "d0e4eff33dc9104254c76df65e5fcc17541b7849",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC4qN8oPT0p2ovQ\n1KzlX1nvglftOpG7F6gKW72mukaVtYUdx6Vw0FZZk3f0CCGXkdbt2aPtuH5H3JEy\nDlJYDhS1yVl/AyyPrFZHdvvt8J2CWlGEJr4ke+fvWacix4U7/woXRK69TIuOIiKo\nI7Wyj1vhWzxRU6N+L7QRis4Etcc1pbzWwFNuFYaW4vm8YxWrvV8+TOJ76DlZix8Y\nGljabsuq1sVmVggjr2o7+5sRu7BSbPoRbvrTKGmDbEFL1KOcv0OVrkJp1nofFnlb\nIHiG92gYQXubU1qaV5ujTZDs39slcwjyl0JjV6iTAmQX8VsAwFZo46hdJHm/Q93g\nk4Fwldj3AgMBAAECggEAAdOIaCVO57flyRoetE1gnin2WlN0IdsRNOUFDP3ro8sT\nTCDvhcbxtloV23Usdot2ijdW/otkEwGJ8r+fLd1vHqslS53JljQt+EVOJuN0fgJh\nqwJtFVRKY3IfYTctnf3Jk5hWIsDRN9smPO55e2YdPQSCJgsYjgTFGE/8oKGhnOoI\nlUAzrQ3GQvysyxFXCHINGUC2kLxzK3i244ApozUzUZ0z40mBcGfg8DNa4j4SNohD\n0nud+piFI489v5uN4EX9RdmPRr/SEWBChZ/iYLDgXYdU2cDyx+hnXWSiugycWLZi\nPXAEXzhoENrCsp5B1AjhmPG0T7LjAj721lHeEtOLaQKBgQDakx5wic47Q0V7L1fb\n8Fuic39+vCw94DEaPvRJH1LEtf1xmulkse4zFUWQC2AOJFw4ptp+7/zoXPOwkWJi\nX9SFGXm4sNihXhwfewW/Iy6w/RioCAZ3+6CC5eC6z6JxzCQCM2+8cFmxJNii6By6\njjq67Hcregi09pwBpyjPb6OoPwKBgQDYRyPsRRA0UM9HwMv9+u/n2r2pviYAHOku\nbn06LKifWkeFPAez3sUYUCHEnhs07r+26vdODcKdny26+6B4u2xWrJaR5Q6jjdUz\nBHpNu8KBXPlpwh3fDmp/k1yYfkRMdHhRh9MC3DzZgfrMsEa5vb6xV/ffqlp8QZcK\nps5EdRVhSQKBgBkwtWRg7Wy1Dw/oX+bQJ69sQjhX9X1YFjChKsQ2oPJcyw3JvbZG\nL16hx/eW6AYZOKuqxymz/ODGvasOxljyFGsWiYm4j+7hCrqyEfJ6Woo5URskeaJg\nVJphZeoBvgYBcfDy/qCoDh41UeZMe+sgMzKRyBYxpUk91rL2EeT+R80/AoGBAK/7\n2ygy3kejhba+E387xCCmJfRL7EHlRHxqnW1Lz32zCUVJnn7nAvuQoJmLiVnd95PQ\nx6D0o2p8jsp6W45B+5rfXrmiZ/H/w/56Y0aDRHbc/3nl4UaSRWg/sXXIMK0BjLHS\n0omeSck28avCuBoFYniNuv19cZlwCYY6Stb7aoU5AoGBALSPOapJbt4dspw0rLVN\neLF6tQW+Lcx36Bsb7VEmk/Mu28HlKmbtjyJa8dAPbNETXPQp5PpLKoOeTqAwApoM\nGY5RfG/fF+RWiTNEZW4+pLFmCmfOeAMNubRjiMQiFNclssZkeFYPeNsfSAMvYdhH\nsc9LMtN36jTejK+XSCNuERJQ\n-----END PRIVATE KEY-----\n",
+  "private_key": RAW_PRIVATE_KEY.replace('\\n', '\n'), # FIX PENTING
   "client_email": "provisioning@decisive-router-474406-n1.iam.gserviceaccount.com",
   "client_id": "101251633100420416304",
   "auth_uri": "https://accounts.google.com/o/oauth2/auth",
@@ -53,22 +57,28 @@ GOOGLE_CREDENTIALS_DICT = {
   "universe_domain": "googleapis.com"
 }
 
-KPRO_TARGET_SHEET_URL = "https://docs.google.com/spreadsheets/d/1wPeYLmInP7JlPCLZ1XYR-A75l9oHQfZ_U2R4Pc6ohVY/"
+# ID SHEET (Lebih stabil daripada URL)
+# Diambil dari: https://docs.google.com/spreadsheets/d/1wPeYLmInP7JlPCLZ1XYR-A75l9oHQfZ_U2R4Pc6ohVY/edit
+KPRO_SHEET_ID = "1wPeYLmInP7JlPCLZ1XYR-A75l9oHQfZ_U2R4Pc6ohVY"
+
 KPRO_TARGET_SHEET_NAME = "REPORT PS INDIHOME"
 KPRO_MICRO_UPDATE_SHEET_NAME = "UPDATE PER 2JAM"
 
 # ==========================================
-# 2. FUNGSI AUTHENTIKASI GOOGLE
+# 2. FUNGSI AUTHENTIKASI GOOGLE (ROBUST)
 # ==========================================
 def get_gspread_client():
-    if not HAS_GSPREAD: return None
+    if not HAS_GSPREAD: 
+        logger.error("Library gspread/oauth2client belum terinstall.")
+        return None
+    
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
-        # Menggunakan Dictionary langsung (Lebih aman dari error format)
+        # Menggunakan Dictionary yang sudah di-fix
         creds = ServiceAccountCredentials.from_json_keyfile_dict(GOOGLE_CREDENTIALS_DICT, scope)
         return gspread.authorize(creds)
     except Exception as e:
-        logger.error(f"Google Auth Error: {e}")
+        logger.error(f"Google Auth Error (Detail): {e}", exc_info=True)
         return None
 
 # MAPPING DATA
@@ -85,7 +95,7 @@ KPRO_MICRO_COLUMN_INDEX_MAP = {
 }
 
 # ==========================================
-# 3. DASHBOARD (VERSI ASLI/ORIGINAL)
+# 3. DASHBOARD (TAMPILAN ASLI / TIDAK DIUBAH)
 # ==========================================
 def create_summary_text(status_counts: pd.Series) -> str:
     def get_count(s): return status_counts.get(s, 0)
@@ -112,7 +122,7 @@ def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
     img = io.BytesIO(); plt.savefig(img, format='png'); img.seek(0); plt.close(fig); return img
 
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
-    # --- LOGIKA DASHBOARD ASLI (TIDAK DIRUBAH TAMPILANNYA) ---
+    # --- LOGIKA DASHBOARD ASLI ---
     stos = sorted(daily_df['STO'].unique())
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
@@ -153,7 +163,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # Visualisasi Matplotlib (Style Lama)
     num_rows = len(display_df)
     fig_height = num_rows * 0.5 + 4.5
     fig = plt.figure(figsize=(12, fig_height))
@@ -182,15 +191,12 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         if row_idx == 0:
             cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold')
             continue
-        
         style = row_styles.get(row_idx - 1, {}); data_row = display_df.iloc[row_idx - 1]
         bg_color, text_color = 'white', 'black'
         status_key = style.get('status')
         if style.get('level') == 2 and status_key == 'WORKFAIL': status_key = 'KENDALA_ERROR'
         if status_key in color_map: bg_color, text_color = color_map[status_key]
-        
         cell.set_facecolor(bg_color); cell.get_text().set_color(text_color)
-
         if col_idx > 0:
             val = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
             cell.get_text().set_text(f"{val:,.0f}" if pd.notna(val) and val > 0 else "")
@@ -198,11 +204,9 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         else:
             cell.get_text().set_text(data_row.iloc[col_idx])
             cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
-        
         if style.get('level') == 3: cell.get_text().set_style('italic')
     
     ax_text.text(0.05, 0.9, create_summary_text(status_counts), ha='left', va='top', fontsize=10, family='monospace')
-    
     img = io.BytesIO(); plt.savefig(img, format='png', dpi=200); img.seek(0); plt.close(fig)
     return img
 
@@ -211,8 +215,11 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
 # ==========================================
 async def process_kpro_logic(raw_df):
     if not ENABLE_GOOGLE_SHEETS: return False, "", {}
+    
+    # 1. Login
     client = get_gspread_client()
-    if not client: return False, "⚠️ Gagal koneksi Google Sheet (Cek Izin Share Email).", {}
+    if not client: 
+        return False, "⚠️ Gagal Login Google. Cek format Key/Library.", {}
 
     msg = []
     wib_tz = timezone(timedelta(hours=7)); today = datetime.now(wib_tz).date()
@@ -223,9 +230,10 @@ async def process_kpro_logic(raw_df):
     raw_df['TGL_MANJA'] = pd.to_datetime(raw_df['TGL_MANJA'], errors='coerce')
     
     try:
-        sh = client.open_by_url(KPRO_TARGET_SHEET_URL)
+        # 2. Buka Sheet via ID (Bukan URL, lebih aman)
+        sh = client.open_by_key(KPRO_SHEET_ID)
         
-        # 1. Update Checkpoint
+        # 3. Update Checkpoint
         ws = sh.worksheet(KPRO_TARGET_SHEET_NAME)
         updates = []
         for sto, row in KPRO_STO_ROW_MAP.items():
@@ -250,7 +258,7 @@ async def process_kpro_logic(raw_df):
         if updates: ws.update_cells(updates, value_input_option='USER_ENTERED')
         msg.append("✅ Checkpoint Updated.")
 
-        # 2. Micro Update
+        # 4. Micro Update
         ws_micro = sh.worksheet(KPRO_MICRO_UPDATE_SHEET_NAME)
         micro_updates = []
         wonum_details = {}
@@ -272,7 +280,8 @@ async def process_kpro_logic(raw_df):
         msg.append("✅ Micro Update Updated.")
 
     except Exception as e:
-        msg.append(f"❌ Error Sheet: {str(e)}")
+        # Menangkap error spesifik Gspread (misal: Sheet Not Found)
+        msg.append(f"❌ Error Koneksi Sheet: {str(e)}")
 
     return True, "\n".join(msg), wonum_details
 
@@ -298,7 +307,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         for c in cols: 
             if c in df.columns: df[c] = df[c].astype(str).str.upper().str.strip()
 
-        # 1. Image Dashboard (ORIGINAL STYLE)
+        # 1. Image Dashboard (Original)
         df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
         valid = df.dropna(subset=['STATUSDATE'])
         if not valid.empty:
