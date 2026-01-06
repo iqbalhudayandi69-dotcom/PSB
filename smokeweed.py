@@ -30,7 +30,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- TOKEN & WEBHOOK ---
-# Disarankan juga token ditaruh di Env Var, tapi hardcode tidak apa-apa
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8330450329:AAGEPd2j2a1dZ1PEJ7BrneykiZ-3Kv1T3LI")
 WEBHOOK_URL = "https://psbiqbal.onrender.com"
 WEBHOOK_PATH = "/telegram"
@@ -48,24 +47,18 @@ KPRO_MICRO_UPDATE_SHEET_NAME = "UPDATE PER 2JAM"
 # ==========================================
 def get_credentials_dict():
     """Membangun dictionary kredensial dari Environment Variables Render"""
-    
-    # Ambil Private Key dari Render Environment
-    # Pastikan di Render Anda membuat env var bernama: GOOGLE_PRIVATE_KEY
     raw_key = os.getenv("GOOGLE_PRIVATE_KEY")
-    
     if not raw_key:
         logger.error("❌ GOOGLE_PRIVATE_KEY tidak ditemukan di Environment Variables!")
         return None
 
-    # FIX PENTING: Render sering mengubah newlines menjadi string literal "\n"
-    # Kita harus kembalikan menjadi karakter enter yang asli.
     clean_key = raw_key.replace("\\n", "\n")
 
     return {
       "type": "service_account",
       "project_id": "decisive-router-474406-n1",
       "private_key_id": "d0e4eff33dc9104254c76df65e5fcc17541b7849",
-      "private_key": clean_key, # Menggunakan key dari Env
+      "private_key": clean_key,
       "client_email": "provisioning@decisive-router-474406-n1.iam.gserviceaccount.com",
       "client_id": "101251633100420416304",
       "auth_uri": "https://accounts.google.com/o/oauth2/auth",
@@ -81,9 +74,7 @@ def get_gspread_client():
         return None
     try:
         creds_dict = get_credentials_dict()
-        if not creds_dict:
-            return None
-            
+        if not creds_dict: return None
         gc = gspread.service_account_from_dict(creds_dict)
         return gc
     except Exception as e:
@@ -104,9 +95,18 @@ KPRO_MICRO_COLUMN_INDEX_MAP = {
 }
 
 # ==========================================
-# 3. DASHBOARD (TAMPILAN ASLI)
+# 3. DASHBOARD & TEXT REPORT
 # ==========================================
+def format_indo_date(dt_obj):
+    """Mengubah datetime menjadi format: Senin, 06 Januari 2026"""
+    days = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+    months = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+    day_name = days[dt_obj.weekday()]
+    month_name = months[dt_obj.month]
+    return f"{day_name}, {dt_obj.day:02d} {month_name} {dt_obj.year}"
+
 def create_summary_text(status_counts: pd.Series) -> str:
+    """Helper sederhana untuk text di dalam gambar (image)"""
     def get_count(s): return status_counts.get(s, 0)
     ps = get_count('COMPWORK')
     acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
@@ -125,9 +125,113 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
 
-def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
+def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) -> str:
+    """Fungsi baru untuk membuat Laporan Teks Detail (Whatsapp Style)"""
     
-    # --- 1. Persiapan Data (Logic from Current/False Code) ---
+    # Setup Tanggal dan Timezone
+    wib_tz = timezone(timedelta(hours=7))
+    current_dt = report_timestamp.astimezone(wib_tz)
+    today_date = current_dt.date()
+    
+    # 1. Filter Data Hari Ini (Berdasarkan STATUSDATE)
+    # Pastikan STATUSDATE sudah datetime
+    df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
+    df['TGL_MANJA'] = pd.to_datetime(df['TGL_MANJA'], errors='coerce')
+    
+    df_today = df[df['STATUSDATE'].dt.date == today_date]
+    
+    # --- HITUNG METRIK ---
+    
+    # TOTAL WO (Harian)
+    total_wo = len(df_today)
+    
+    # AKTIVASI HI
+    # ACOM: ACOMP + VALSTART + VALCOMP
+    acom = len(df_today[df_today['STATUS'].isin(['ACOMP', 'VALSTART', 'VALCOMP'])])
+    # PS HI: COMPWORK
+    ps_hi = len(df_today[df_today['STATUS'] == 'COMPWORK'])
+    # FO AKTIVASI: STARTWORK (PI)
+    fo_aktivasi = len(df_today[df_today['STATUS'] == 'STARTWORK'])
+    estimasi_ps = ps_hi + acom
+    
+    # SISA WO (PI HI Breakdown)
+    # Base: Status saat ini adalah STARTWORK (PI)
+    # Filter tambahan: Kapan status itu terjadi (STATUSDATE)
+    pi_base = df_today[df_today['STATUS'] == 'STARTWORK']
+    
+    # Jam OPS: 08:00 - 17:00
+    pi_ops = len(pi_base[(pi_base['STATUSDATE'].dt.hour >= 8) & (pi_base['STATUSDATE'].dt.hour < 17)])
+    # Diluar Jam OPS: < 08:00 ATAU >= 17:00
+    pi_non_ops = len(pi_base[~((pi_base['STATUSDATE'].dt.hour >= 8) & (pi_base['STATUSDATE'].dt.hour < 17))])
+    # Total PI HI
+    pi_total = len(pi_base)
+    
+    # MANJA
+    # Manja biasanya dihitung dari WO yang masih aktif (misal STARTWORK) atau semua? 
+    # Mengikuti logika sheet (STATUS='STARTWORK')
+    manja_base = df[df['STATUS'] == 'STARTWORK']
+    manja_h_min = len(manja_base[manja_base['TGL_MANJA'].dt.date < today_date])
+    manja_hi = len(manja_base[manja_base['TGL_MANJA'].dt.date == today_date])
+    manja_h_plus = len(manja_base[manja_base['TGL_MANJA'].dt.date > today_date])
+    
+    # WO KENDALA HI
+    kendala_base = df_today[df_today['STATUS'] == 'WORKFAIL']
+    kendala_hi = len(kendala_base)
+    # Menggunakan contains untuk menangkap variasi penulisan
+    teknik = len(kendala_base[kendala_base['ERRORCODE'].str.contains('TEKNIK', na=False)])
+    non_teknik = len(kendala_base[kendala_base['ERRORCODE'].str.contains('PELANGGAN', na=False)])
+    # Jika ada error code lain yang tidak tercover, bisa ditambahkan logika else, 
+    # tapi sementara kita asumsikan sisanya masuk non_teknik atau biarkan sesuai data sheet.
+    
+    # PS/RE MTD (Month to Date)
+    df_mtd = df[(df['STATUSDATE'].dt.month == today_date.month) & 
+                (df['STATUSDATE'].dt.year == today_date.year) & 
+                (df['STATUS'] == 'COMPWORK')]
+    ps_mtd = len(df_mtd)
+
+    # Header Date formatting
+    header_date = format_indo_date(current_dt)
+    last_update_str = current_dt.strftime('%d/%m/%y')
+
+    # --- KONSTRUKSI STRING ---
+    report_text = (
+        f"Fulfillment Endstate Witel JAKPUS\n"
+        f"{header_date}\n"
+        f"--------------------\n\n"
+        f"Total WO: {total_wo}\n\n"
+        
+        f"Aktivasi HI\n"
+        f"* FO AKTIVASI: {fo_aktivasi}\n"
+        f"* ACOM: {acom}\n"
+        f"* PS HI: {ps_hi}\n"
+        f"* Estimasi PS: {estimasi_ps}\n\n"
+        
+        f"Sisa WO\n"
+        f"* Sisa PI HI (Jam OPS): {pi_ops}\n"
+        f"* Sisa PI HI (Diluar Jam OPS): {pi_non_ops}\n"
+        f"* PI HI: {pi_total}\n\n"
+        
+        f"Manja\n"
+        f"* H-: {manja_h_min}\n"
+        f"* HI: {manja_hi}\n"
+        f"* H+: {manja_h_plus}\n\n"
+        
+        f"WO Kendala HI\n"
+        f"* Kendala HI: {kendala_hi}\n"
+        f"* Teknik: {teknik}\n"
+        f"* Non Teknik: {non_teknik}\n\n"
+        
+        f"PS/RE\n"
+        f"* PS/RE HI: {ps_hi}\n"
+        f"* PS/RE MTD: {ps_mtd}\n\n"
+        
+        f"Last Update BIMA: {last_update_str}"
+    )
+    
+    return report_text
+
+def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
+    # --- 1. Persiapan Data ---
     stos = sorted(daily_df['STO'].unique())
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
@@ -147,7 +251,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
 
         if status == 'WORKFAIL':
             for error_code, error_group in status_df.groupby('ERRORCODE'):
-                # Robust check from Current Code
                 if str(error_code).upper() in ['NAN', 'N/A']: continue
                 
                 error_row = {'KATEGORI': f"  ↳ {error_code}"}
@@ -177,27 +280,23 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # --- 2. Visualisasi (Formatting from Correct Output) ---
+    # --- 2. Visualisasi ---
     num_rows = len(display_df)
-    # Dynamic height calculation
     fig_height = num_rows * 0.5 + 4.5
     
     fig = plt.figure(figsize=(12, fig_height))
-    # GridSpec ratios to ensure table fits comfortably
     gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 5])
     
     ax_title = fig.add_subplot(gs[0]); ax_title.axis('off')
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    # Title Formatting
     ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
     col_widths = [0.35] + [0.08] * (len(stos) + 1)
     table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
                            loc='center', cellLoc='center', colWidths=col_widths)
-    # Scaling to match correct output
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
     color_map = {
@@ -231,16 +330,11 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         
         if style.get('level') == 3: cell.get_text().set_style('italic')
     
-    # Summary text
     ax_text.text(0.05, 0.9, create_summary_text(status_counts), ha='left', va='top', fontsize=10, family='monospace')
     
-    # CRITICAL: tight_layout fixes the sizing issues
     plt.tight_layout()
-    
     image_buffer = io.BytesIO()
-    plt.savefig(image_buffer, format='png', dpi=200)
-    image_buffer.seek(0)
-    plt.close(fig)
+    plt.savefig(image_buffer, format='png', dpi=200); image_buffer.seek(0); plt.close(fig)
     return image_buffer
 
 def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
@@ -249,22 +343,18 @@ def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
     fig.suptitle(f"NO DATA - {report_timestamp.strftime('%d %b %Y')}", fontsize=16)
     plt.tight_layout()
     image_buffer = io.BytesIO()
-    plt.savefig(image_buffer, format='png', dpi=150)
-    image_buffer.seek(0)
-    plt.close(fig)
+    plt.savefig(image_buffer, format='png', dpi=150); image_buffer.seek(0); plt.close(fig)
     return image_buffer
 
 # ==========================================
 # 4. LOGIKA INTEGRASI KPRO (Google Sheet)
 # ==========================================
 async def process_kpro_logic(raw_df):
-    # PERBAIKAN: Variabel didefinisikan di awal agar tidak error "UnboundLocal"
     msg = []
     wonum_details = {}
 
     if not ENABLE_GOOGLE_SHEETS: return False, "", {}
     
-    # 1. Login
     client = get_gspread_client()
     if not client: return False, "⚠️ Gagal Login Google. Cek Env Var 'GOOGLE_PRIVATE_KEY'.", {}
 
@@ -276,10 +366,7 @@ async def process_kpro_logic(raw_df):
     raw_df['TGL_MANJA'] = pd.to_datetime(raw_df['TGL_MANJA'], errors='coerce')
     
     try:
-        # 2. Buka Sheet via ID
         sh = client.open_by_key(KPRO_SHEET_ID)
-        
-        # 3. Update Checkpoint
         ws = sh.worksheet(KPRO_TARGET_SHEET_NAME)
         updates = []
         for sto, row in KPRO_STO_ROW_MAP.items():
@@ -304,10 +391,8 @@ async def process_kpro_logic(raw_df):
         if updates: ws.update_cells(updates, value_input_option='USER_ENTERED')
         msg.append("✅ Checkpoint Updated.")
 
-        # 4. Micro Update
         ws_micro = sh.worksheet(KPRO_MICRO_UPDATE_SHEET_NAME)
         micro_updates = []
-        
         today_df = raw_df[raw_df['STATUSDATE'].dt.date == today]
         
         for sto, row in KPRO_MICRO_STO_ROW_MAP.items():
@@ -352,47 +437,40 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         for c in cols: 
             if c in df.columns: df[c] = df[c].astype(str).str.upper().str.strip()
 
-        # 1. Image Dashboard
         df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
         valid = df.dropna(subset=['STATUSDATE'])
+        
         if not valid.empty:
             latest = valid['STATUSDATE'].dt.date.max()
             daily = valid[valid['STATUSDATE'].dt.date == latest].copy()
             ts = update.message.date.astimezone(timezone(timedelta(hours=7)))
             
+            # 1. Kirim Image Dashboard
             img = create_integrated_dashboard(daily, ts, daily['STATUS'].value_counts())
             await update.message.reply_photo(InputFile(img, filename="dash.png"), caption=f"Report {latest.strftime('%d/%m/%Y')}")
+
+            # 2. Kirim Text Report Detail (BARU)
+            detailed_text = create_detailed_text_report(df, ts)
+            await update.message.reply_text(detailed_text)
         
-        # 2. Google Sheets
+        # 3. Google Sheets
         if ENABLE_GOOGLE_SHEETS:
-            # Panggil fungsi yang sudah di-fix
             _, log, details = await process_kpro_logic(df)
             if log: await update.message.reply_text(log)
             
             if details:
+                # Logika estimasi text lama masih ada jika dibutuhkan, 
+                # atau bisa dihapus jika Text Report baru sudah cukup.
+                # Saya biarkan sebagai pelengkap debug.
                 today = datetime.now(timezone(timedelta(hours=7))).date()
                 today_comp = valid[(valid['STATUSDATE'].dt.date == today) & (valid['STATUS'] == 'COMPWORK')]
-                est_txt = [f"📋 *Estimasi PS {today.strftime('%d/%m')}*"]
-                tot_t = 0; tot_p = 0
+                est_txt = [f"📋 *Estimasi PS (Debug)*"]
                 for sto in KPRO_STO_ROW_MAP:
                     row = today_comp[today_comp['STO'] == sto]
                     pda = len(row[row['SCORDERNO'].str.contains('PDA', na=False)])
                     tsel = len(row) - pda
-                    tot_t += tsel; tot_p += pda
                     est_txt.append(f"{sto}: TSEL={tsel}, PDA={pda}")
-                est_txt.append(f"TOTAL: TSEL={tot_t}, PDA={tot_p}")
-                await update.message.reply_text("\n".join(est_txt))
-                
-                micro_txt = ["🔍 *Detail Micro*"]
-                for sto, stats in details.items():
-                    if stats:
-                        micro_txt.append(f"\n__{sto}__")
-                        for s, n in stats.items(): micro_txt.append(f"{s} ({len(n)}): {', '.join(map(str, n))}")
-                
-                full_m = "\n".join(micro_txt)
-                if len(full_m) > 4000:
-                    for i in range(0, len(full_m), 4000): await update.message.reply_text(full_m[i:i+4000])
-                else: await update.message.reply_text(full_m)
+                # await update.message.reply_text("\n".join(est_txt)) # Optional: Di-comment agar tidak spam
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
