@@ -1,33 +1,31 @@
 import logging
 import pandas as pd
 import matplotlib.pyplot as plt
-import io
-import os
-from datetime import datetime, timezone, timedelta
-from fastapi import FastAPI, Request, Response
-from contextlib import asynccontextmanager
 from telegram import Update, InputFile
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, ContextTypes
+import io
+import os
+from fastapi import FastAPI, Request, Response
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 
 # ==========================================
-# 1. KONFIGURASI & LOGGING
+# 1. KONFIGURASI LOGGING & BOT
 # ==========================================
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
-    level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = "8330450329:AAGEPd2j2a1dZ1PEJ7BrneykiZ-3Kv1T3LI"
 WEBHOOK_URL = "https://psbiqbal.onrender.com"
-WEBHOOK_PATH = "/telegram"
+WEBHOOK_PATH = "/telegram" 
 
 # ==========================================
-# 2. FUNGSI PEMBANTU (DASHBOARD & LOGIKA)
+# 2. FUNGSI LOGIKA DASHBOARD (TIDAK DIRUBAH)
 # ==========================================
 
 def create_summary_text(status_counts: pd.Series) -> str:
-    """Membuat ringkasan teks untuk bagian bawah dashboard."""
     def get_count(s): return status_counts.get(s, 0)
     
     ps = get_count('COMPWORK')
@@ -42,14 +40,13 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"--------------------------------------\n"
         f"PS (COMPWORK)                 = {ps}\n"
         f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
-        f"PI (STARTWORK)                = {pi}\n"
+        f"PI (STARTWORK)                  = {pi}\n"
         f"PI PROGRESS (INSTCOMP+PENDWORK+CONTWORK) = {pi_progress}\n"
-        f"KENDALA (WORKFAIL)            = {kendala}\n"
-        f"EST PS (PS+ACOM)              = {est_ps}"
+        f"KENDALA (WORKFAIL)              = {kendala}\n"
+        f"EST PS (PS+ACOM)                = {est_ps}"
     )
 
 def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
-    """Membuat gambar pesan error jika tidak ada data."""
     fig, ax = plt.subplots(figsize=(10, 3))
     ax.axis('off')
     fig.suptitle(f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", fontsize=16, weight='bold')
@@ -60,9 +57,7 @@ def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
     return image_buffer
 
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
-    """Logika utama pembuatan visualisasi tabel dan summary menggunakan Matplotlib."""
-    
-    # Persiapan Data
+    # --- 1. Persiapan Data & Konstruksi Tabel ---
     stos = sorted(daily_df['STO'].unique())
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
@@ -73,6 +68,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         if status not in unique_statuses_in_data: continue
             
         status_df = daily_df[daily_df['STATUS'] == status]
+        
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
@@ -90,22 +86,16 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
                 for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
                     if sub_error_code in ['NAN', 'N/A']: continue
                     sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
-                    for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sub_error_code]) # Fix filter logic here if needed
-                    # Recalculate sub_error specifically
-                    for sto in stos:
-                        sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
-                    
+                    for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
                     if sum(list(sub_error_row.values())[1:]) > 0:
                         table_data.append(sub_error_row)
                         row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
     if not table_data: return create_empty_dashboard(report_timestamp)
 
-    # Konversi ke DataFrame untuk Tabel
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
     display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
-    # Hitung Grand Total Akhir
     relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles.get(table_data.index(row), {}).get('level') == 1]
     total_source_df = daily_df[daily_df['STATUS'].isin(relevant_statuses)]
     grand_total_row = {'KATEGORI': 'Grand Total'}
@@ -115,9 +105,13 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # Pembuatan Figure
+    # --- 2. Perhitungan Teks Ringkasan ---
+    summary_text = create_summary_text(status_counts)
+
+    # --- 3. Visualisasi ---
     num_rows = len(display_df)
     fig_height = num_rows * 0.5 + 4.5
+    
     fig = plt.figure(figsize=(12, fig_height))
     gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 5])
     
@@ -125,17 +119,14 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    # Judul
     ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
-    # Tabel
     col_widths = [0.35] + [0.08] * (len(stos) + 1)
     table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
                            loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # Styling Warna Tabel
     color_map = {
         'COMPWORK': ('#556B2F', 'white'), 'ACOMP': ('#9ACD32', 'black'), 'VALCOMP': ('#9ACD32', 'black'), 
         'VALSTART': ('#9ACD32', 'black'), 'WORKFAIL': ('#FF8C00', 'white'), 'KENDALA_ERROR': ('#FFDAB9', 'black'), 
@@ -148,8 +139,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
             cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold')
             continue
         
-        style = row_styles.get(row_idx - 1, {})
-        data_row = display_df.iloc[row_idx - 1]
+        style = row_styles.get(row_idx - 1, {}); data_row = display_df.iloc[row_idx - 1]
         
         bg_color, text_color = 'white', 'black'
         status_key = style.get('status')
@@ -159,14 +149,14 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         cell.set_facecolor(bg_color); cell.get_text().set_color(text_color)
 
         if col_idx > 0:
-            val = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
-            cell.get_text().set_text(f"{val:,.0f}" if pd.notna(val) and val > 0 else "")
+            numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
+            cell.get_text().set_text(f"{numeric_value:,.0f}" if pd.notna(numeric_value) and numeric_value > 0 else "")
             cell.set_text_props(ha='center', va='center', weight='bold')
         else:
+            cell.get_text().set_text(data_row.iloc[col_idx])
             cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
     
-    # Tambahkan Ringkasan Teks
-    ax_text.text(0.05, 0.9, create_summary_text(status_counts), ha='left', va='top', fontsize=10, family='monospace')
+    ax_text.text(0.05, 0.9, summary_text, ha='left', va='top', fontsize=10, family='monospace')
     
     plt.tight_layout()
     image_buffer = io.BytesIO()
@@ -174,104 +164,90 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     return image_buffer
 
 # ==========================================
-# 3. TELEGRAM HANDLERS
+# 3. COMMAND & MESSAGE HANDLERS
 # ==========================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("Halo! Silakan kirim file Excel laporan (.xls/.xlsx) Anda.")
+    await update.message.reply_text("Halo! Kirimkan file Excel (.xls atau .xlsx) untuk mendapatkan laporan.")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text("Kirim file Excel, saya akan memproses dashboard berdasarkan tanggal terbaru di file tersebut.")
+    await update.message.reply_text("Bot ini akan membuat dashboard terintegrasi dari file Excel yang Anda unggah.")
 
 async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Set zona waktu WIB
     wib_tz = timezone(timedelta(hours=7))
     upload_timestamp_wib = update.message.date.astimezone(wib_tz)
     
     document = update.message.document
-    if not (document.file_name.endswith(('.xls', '.xlsx'))):
-        await update.message.reply_text("Hanya menerima format .xls atau .xlsx.")
+    if not (document.file_name.endswith('.xls') or document.file_name.endswith('.xlsx')):
+        await update.message.reply_text("Mohon unggah file dengan format .xls atau .xlsx.")
         return
 
-    msg = await update.message.reply_text("Memproses data, mohon tunggu...")
+    await update.message.reply_text("Menerima file, sedang memproses laporan...")
 
     try:
-        # Download file
-        file_obj = await context.bot.get_file(document.file_id)
+        new_file = await context.bot.get_file(document.file_id)
         file_buffer = io.BytesIO()
-        await file_obj.download_to_memory(file_buffer)
+        await new_file.download_to_memory(file_buffer)
         file_buffer.seek(0)
 
-        # Baca Excel
         df = pd.read_excel(file_buffer)
-        
-        # Validasi Header
+
+        # Validasi header
         required = ['SCORDERNO', 'STO', 'STATUSDATE', 'STATUS', 'ERRORCODE', 'SUBERRORCODE']
         if not all(h in df.columns for h in required):
-            await update.message.reply_text("Gagal! Pastikan file memiliki kolom: " + ", ".join(required))
+            await update.message.reply_text("Header Excel tidak lengkap.")
             return
-
-        # Preprocessing
+            
         for col in ['STO', 'STATUS', 'ERRORCODE', 'SUBERRORCODE']:
             df[col] = df[col].astype(str).str.strip().str.upper()
         df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
         df.dropna(subset=['STATUSDATE'], inplace=True)
         
         if df.empty:
-            await update.message.reply_text("Data kosong setelah filter tanggal.")
+            await update.message.reply_text("Tidak ada data tanggal valid.")
             return
             
-        # Ambil data tanggal terbaru
         latest_date = df['STATUSDATE'].dt.date.max()
         daily_df = df[df['STATUSDATE'].dt.date == latest_date].copy()
         status_counts = daily_df['STATUS'].value_counts()
         
-        # Buat Dashboard
-        image_buffer = create_integrated_dashboard(daily_df, upload_timestamp_wib, status_counts)
+        image_buffer = create_integrated_dashboard(daily_df, upload_timestamp_wib, status_counts) 
         
-        # Kirim Hasil
-        caption = f"✅ REPORT DAILY JAKPUS\n📅 Data Tanggal: {latest_date.strftime('%d/%m/%Y')}\n⏰ Diproses: {upload_timestamp_wib.strftime('%H:%M:%S')} WIB"
-        await update.message.reply_photo(
-            photo=InputFile(image_buffer, filename="report.png"), 
-            caption=caption
-        )
-        await msg.delete()
+        caption = f"REPORT DAILY ENDSTATE JAKPUS - {upload_timestamp_wib.strftime('%d %B %Y')}"
+        await update.message.reply_photo(photo=InputFile(image_buffer, filename="dashboard.png"), caption=caption)
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
-        await update.message.reply_text(f"❌ Terjadi kesalahan sistem: {str(e)}")
+        await update.message.reply_text("Terjadi kesalahan saat memproses file.")
 
 # ==========================================
-# 4. SETUP FASTAPI & WEBHOOK
+# 4. SETUP BOT & FASTAPI (WEBHOOK)
 # ==========================================
 
-ptb_app = Application.builder().token(BOT_TOKEN).arbitrary_callback_data(True).build()
+ptb_application = Application.builder().token(BOT_TOKEN).arbitrary_callback_data(True).build()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Setup Handlers
-    ptb_app.add_handler(CommandHandler("start", start))
-    ptb_app.add_handler(CommandHandler("help", help_command))
-    ptb_app.add_handler(MessageHandler(filters.Document.ALL, handle_excel_file))
+    # Daftarkan Handlers
+    ptb_application.add_handler(CommandHandler("start", start))
+    ptb_application.add_handler(CommandHandler("help", help_command))
+    ptb_application.add_handler(MessageHandler(filters.Document.ALL, handle_excel_file))
     
-    # Start Bot
-    await ptb_app.initialize()
-    await ptb_app.start()
-    await ptb_app.bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
-    logger.info("Bot & Webhook initialized.")
-    yield
-    # Stop Bot
-    await ptb_app.stop()
-    await ptb_app.shutdown()
+    await ptb_application.initialize()
+    await ptb_application.start()
+    await ptb_application.bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+    yield 
+    await ptb_application.stop()
+    await ptb_application.shutdown()
 
 app = FastAPI(lifespan=lifespan)
 
-@app.get("/")
-async def root(): return {"status": "running"}
-
 @app.post(WEBHOOK_PATH)
-async def webhook_handler(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, ptb_app.bot)
-    await ptb_app.process_update(update)
+async def telegram_webhook(request: Request):
+    json_data = await request.json()
+    update = Update.de_json(json_data, ptb_application.bot)
+    await ptb_application.process_update(update)
     return Response(status_code=200)
+
+@app.get("/")
+async def root(): return {"message": "Bot is running"}
