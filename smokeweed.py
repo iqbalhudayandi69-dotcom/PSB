@@ -38,7 +38,7 @@ WEBHOOK_PATH = "/telegram"
 # --- PENGATURAN FITUR ---
 # Ubah ke True jika Anda ingin bot mengupdate Google Sheet
 # Pastikan file credentials.json ada di folder yang sama.
-ENABLE_GOOGLE_SHEETS = False 
+ENABLE_GOOGLE_SHEETS = True 
 
 CREDENTIALS_FILE = "credentials.json"
 KPRO_TARGET_SHEET_URL = "https://docs.google.com/spreadsheets/d/1wPeYLmInP7JlPCLZ1XYR-A75l9oHQfZ_U2R4Pc6ohVY/"
