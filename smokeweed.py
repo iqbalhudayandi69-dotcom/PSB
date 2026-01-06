@@ -47,7 +47,9 @@ KPRO_MICRO_UPDATE_SHEET_NAME = "UPDATE PER 2JAM"
 # ==========================================
 def get_credentials_dict():
     """Membangun dictionary kredensial dari Environment Variables Render"""
+    
     raw_key = os.getenv("GOOGLE_PRIVATE_KEY")
+    
     if not raw_key:
         logger.error("❌ GOOGLE_PRIVATE_KEY tidak ditemukan di Environment Variables!")
         return None
@@ -74,7 +76,9 @@ def get_gspread_client():
         return None
     try:
         creds_dict = get_credentials_dict()
-        if not creds_dict: return None
+        if not creds_dict:
+            return None
+            
         gc = gspread.service_account_from_dict(creds_dict)
         return gc
     except Exception as e:
@@ -95,10 +99,11 @@ KPRO_MICRO_COLUMN_INDEX_MAP = {
 }
 
 # ==========================================
-# 3. DASHBOARD & TEXT REPORT (LOGIKA BARU)
+# 3. DASHBOARD & TEXT REPORT (LOGIC UTAMA)
 # ==========================================
+
 def format_indo_date(dt_obj):
-    """Mengubah datetime menjadi format: Senin, 06 Januari 2026"""
+    """Helper: Format tanggal Indonesia (Senin, 06 Januari 2026)"""
     days = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
     months = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
     day_name = days[dt_obj.weekday()]
@@ -106,7 +111,7 @@ def format_indo_date(dt_obj):
     return f"{day_name}, {dt_obj.day:02d} {month_name} {dt_obj.year}"
 
 def create_summary_text(status_counts: pd.Series) -> str:
-    """Helper sederhana untuk text di dalam gambar (image)"""
+    """Helper untuk text ringkasan di dalam Gambar"""
     def get_count(s): return status_counts.get(s, 0)
     ps = get_count('COMPWORK')
     acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
@@ -127,89 +132,82 @@ def create_summary_text(status_counts: pd.Series) -> str:
 
 def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) -> str:
     """
-    Fungsi baru untuk membuat Laporan Teks Detail (Whatsapp Style)
-    Sesuai request: FO AKTIVASI, Jam OPS, Manja, dll.
+    Fungsi membuat Laporan Teks Detail (Format WhatsApp).
     """
-    
-    # Setup Tanggal dan Timezone
+    # Setup Timezone
     wib_tz = timezone(timedelta(hours=7))
     current_dt = report_timestamp.astimezone(wib_tz)
     today_date = current_dt.date()
     
-    # Pastikan Kolom format datetime
+    # Konversi kolom ke datetime
     df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
+    df['DATECREATED'] = pd.to_datetime(df['DATECREATED'], errors='coerce')
     df['TGL_MANJA'] = pd.to_datetime(df['TGL_MANJA'], errors='coerce')
     
-    # --- DATASET ACTIVITY (Hari Ini) ---
-    # Digunakan untuk PS, Kendala, Aktivasi yang terjadi HARI INI
+    # --- FILTER DATASET ---
+    # 1. Transaksi Hari Ini (Berdasarkan Status Date)
     df_today = df[df['STATUSDATE'].dt.date == today_date]
     
-    # --- DATASET SNAPSHOT (Stock) ---
-    # Digunakan untuk PI (Startwork) & Manja
-    # Asumsi: File excel berisi status WO terakhir. Jadi kita cari WO yang statusnya masih 'STARTWORK'
-    df_snapshot_pi = df[df['STATUS'] == 'STARTWORK']
+    # 2. Transaksi Created Hari Ini (Untuk Total WO / RE HI)
+    df_created_today = df[df['DATECREATED'].dt.date == today_date]
     
-    # --- 1. TOTAL WO (Harian) ---
-    total_wo = len(df_today)
+    # 3. Snapshot Active (Untuk PI & Manja) - Cari status STARTWORK
+    df_pi = df[df['STATUS'] == 'STARTWORK']
     
-    # --- 2. AKTIVASI HI ---
-    # FO AKTIVASI: CONTWORK + INSTCOMP + PENDWORK (Sesuai request)
+    # --- HITUNG METRIK ---
+    
+    # A. Total WO: DATE CREAT HI (HARI INI)
+    total_wo_hi = len(df_created_today)
+    
+    # B. Aktivasi HI (Status Date Hari Ini)
     fo_aktivasi = len(df_today[df_today['STATUS'].isin(['CONTWORK', 'INSTCOMP', 'PENDWORK'])])
-    
-    # ACOM: VALSTART + ACOMP + VALCOMP
     acom = len(df_today[df_today['STATUS'].isin(['VALSTART', 'ACOMP', 'VALCOMP'])])
-    
-    # PS HI: COMPWORK
     ps_hi = len(df_today[df_today['STATUS'] == 'COMPWORK'])
-    
-    # Estimasi PS: PS + ACOM
     estimasi_ps = ps_hi + acom
     
-    # --- 3. SISA WO (Breakdown PI HI) ---
-    # Base: Semua WO dengan status STARTWORK (dari df global/snapshot)
+    # C. Sisa WO (Dari Snapshot PI/STARTWORK)
+    # Jam OPS: < 17:00
+    pi_ops = len(df_pi[df_pi['STATUSDATE'].dt.hour < 17])
+    # Luar OPS: >= 17:00
+    pi_non_ops = len(df_pi[df_pi['STATUSDATE'].dt.hour >= 17])
+    # Total PI
+    pi_total = len(df_pi)
     
-    # Sisa PI HI (Jam OPS): STATUS STARTWORK dibawah jam 17.00
-    # Logic: Jam statusdate < 17
-    pi_ops = len(df_snapshot_pi[df_snapshot_pi['STATUSDATE'].dt.hour < 17])
+    # D. Manja (Dari Snapshot PI berdasarkan TGL_MANJA)
+    manja_h_min = len(df_pi[df_pi['TGL_MANJA'].dt.date < today_date])
+    manja_hi = len(df_pi[df_pi['TGL_MANJA'].dt.date == today_date])
+    manja_h_plus = len(df_pi[df_pi['TGL_MANJA'].dt.date > today_date])
     
-    # Sisa PI HI (Diluar Jam OPS): STATUS STARTWORK diatas jam 17.00 (>= 17)
-    pi_non_ops = len(df_snapshot_pi[df_snapshot_pi['STATUSDATE'].dt.hour >= 17])
+    # E. Kendala HI (Status Date Hari Ini)
+    df_kendala = df_today[df_today['STATUS'] == 'WORKFAIL']
+    kendala_hi = len(df_kendala)
     
-    # PI HI: Semua STATUS STARTWORK
-    pi_total = len(df_snapshot_pi)
+    # Deteksi Teknik vs Non Teknik via string matching
+    # Asumsi: Jika error code mengandung 'TEKNIK' masuk teknik, 'PELANGGAN' masuk non-teknik
+    teknik = len(df_kendala[df_kendala['ERRORCODE'].str.contains('TEKNIK', na=False)])
+    non_teknik = len(df_kendala[df_kendala['ERRORCODE'].str.contains('PELANGGAN', na=False)])
+    # Sisa yang tidak terdeteksi (opsional, dimasukkan ke Non Teknik jika perlu)
+    # sisa_kendala = kendala_hi - teknik - non_teknik 
+    # non_teknik += sisa_kendala 
     
-    # --- 4. MANJA ---
-    # Diambil dari TGL Manja pada WO yang statusnya STARTWORK
-    manja_h_min = len(df_snapshot_pi[df_snapshot_pi['TGL_MANJA'].dt.date < today_date])
-    manja_hi = len(df_snapshot_pi[df_snapshot_pi['TGL_MANJA'].dt.date == today_date])
-    manja_h_plus = len(df_snapshot_pi[df_snapshot_pi['TGL_MANJA'].dt.date > today_date])
+    # F. PS/RE (Persentase)
+    # PS/RE HI = (PS HI / Total WO HI) * 100
+    ps_re_hi_pct = 0.0
+    if total_wo_hi > 0:
+        ps_re_hi_pct = (ps_hi / total_wo_hi) * 100
+        
+    # PS/RE MTD (Month to Date)
+    df_mtd_created = df[(df['DATECREATED'].dt.month == today_date.month) & (df['DATECREATED'].dt.year == today_date.year)]
+    df_mtd_ps = df[(df['STATUSDATE'].dt.month == today_date.month) & (df['STATUSDATE'].dt.year == today_date.year) & (df['STATUS'] == 'COMPWORK')]
     
-    # --- 5. WO KENDALA HI ---
-    kendala_base = df_today[df_today['STATUS'] == 'WORKFAIL']
-    kendala_hi = len(kendala_base)
+    total_wo_mtd = len(df_mtd_created)
+    ps_mtd = len(df_mtd_ps)
     
-    # Teknik vs Non Teknik (Menggunakan pencarian string agar lebih fleksibel)
-    # Jika ERRORCODE mengandung 'TEKNIK' -> Teknik, 'PELANGGAN' -> Non Teknik
-    teknik = len(kendala_base[kendala_base['ERRORCODE'].str.contains('TEKNIK', na=False)])
-    non_teknik = len(kendala_base[kendala_base['ERRORCODE'].str.contains('PELANGGAN', na=False)])
-    
-    # Jika ada sisa (bukan teknik/pelanggan), biasanya dimasukkan ke salah satu atau ditampilkan terpisah.
-    # Disini kita ikuti request "Teknik" dan "Non Teknik", sisanya dianggap Non Teknik jika tidak spesifik,
-    # atau biarkan apa adanya. Agar aman:
-    # non_teknik = kendala_hi - teknik  <-- Opsi alternatif jika ingin total balance
-    
-    # --- 6. PS/RE ---
-    # PS/RE HI: Sama dengan PS HI
-    ps_re_hi = ps_hi
-    
-    # PS/RE MTD: PS bulan ini (COMPWORK di bulan berjalan)
-    # Perlu filter df global berdasarkan bulan
-    df_mtd = df[(df['STATUSDATE'].dt.month == today_date.month) & 
-                (df['STATUSDATE'].dt.year == today_date.year) & 
-                (df['STATUS'] == 'COMPWORK')]
-    ps_re_mtd = len(df_mtd)
+    ps_re_mtd_pct = 0.0
+    if total_wo_mtd > 0:
+        ps_re_mtd_pct = (ps_mtd / total_wo_mtd) * 100
 
-    # --- FORMATTING OUTPUT ---
+    # --- FORMAT OUTPUT ---
     header_date = format_indo_date(current_dt)
     last_update_str = current_dt.strftime('%d/%m/%y %H:%M')
 
@@ -218,7 +216,7 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
         f"{header_date}\n"
         f"--------------------\n\n"
         
-        f"Total WO: {total_wo}\n\n"
+        f"Total WO: {total_wo_hi}\n\n"
         
         f"Aktivasi HI\n"
         f"* FO AKTIVASI: {fo_aktivasi}\n"
@@ -242,8 +240,8 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
         f"* Non Teknik: {non_teknik}\n\n"
         
         f"PS/RE\n"
-        f"* PS/RE HI: {ps_re_hi}\n"
-        f"* PS/RE MTD: {ps_re_mtd}\n\n"
+        f"* PS/RE HI: {ps_re_hi_pct:.1f}%\n"
+        f"* PS/RE MTD: {ps_re_mtd_pct:.1f}%\n\n"
         
         f"Last Update BIMA: {last_update_str}"
     )
@@ -251,7 +249,7 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
     return report_text
 
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
-    # --- 1. Persiapan Data & Konstruksi Tabel ---
+    # --- 1. Persiapan Data ---
     stos = sorted(daily_df['STO'].unique())
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
@@ -272,7 +270,6 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         if status == 'WORKFAIL':
             for error_code, error_group in status_df.groupby('ERRORCODE'):
                 if str(error_code).upper() in ['NAN', 'N/A']: continue
-                
                 error_row = {'KATEGORI': f"  ↳ {error_code}"}
                 for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
                 table_data.append(error_row)
@@ -300,7 +297,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
-    # --- 2. Visualisasi (Fixed Layout) ---
+    # --- 2. Visualisasi (Fixed Layout & Sizing) ---
     num_rows = len(display_df)
     fig_height = num_rows * 0.5 + 4.5
     
@@ -470,8 +467,6 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_photo(InputFile(img, filename="dash.png"), caption=f"Report {latest.strftime('%d/%m/%Y')}")
 
             # 2. Kirim Text Report Detail (FITUR BARU)
-            # Kita pass 'df' (dataframe penuh) agar bisa hitung PI/Manja dari stock,
-            # dan 'ts' untuk referensi waktu laporan
             detailed_text = create_detailed_text_report(df, ts)
             await update.message.reply_text(detailed_text)
         
@@ -480,18 +475,11 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             _, log, details = await process_kpro_logic(df)
             if log: await update.message.reply_text(log)
             
-            # (Opsional) Detail Micro Lama tetap bisa jalan jika dibutuhkan
+            # (Opsional) Detail Micro Lama (List WO) bisa dikomentari jika tidak diperlukan lagi
+            # karena sudah ada Text Report baru. Saya biarkan aktif sebagai lampiran.
             if details:
-                micro_txt = ["🔍 *Detail Micro (List)*"]
-                for sto, stats in details.items():
-                    if stats:
-                        micro_txt.append(f"\n__{sto}__")
-                        for s, n in stats.items(): micro_txt.append(f"{s} ({len(n)}): {', '.join(map(str, n))}")
-                
-                full_m = "\n".join(micro_txt)
-                if len(full_m) > 4000:
-                    for i in range(0, len(full_m), 4000): await update.message.reply_text(full_m[i:i+4000])
-                else: await update.message.reply_text(full_m)
+                 # Jika ingin mematikan list panjang, comment block ini
+                 pass 
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
