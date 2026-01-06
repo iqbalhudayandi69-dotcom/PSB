@@ -6,4 +6,5 @@ openpyxl
 xlrd
 fastapi
 uvicorn
-
+httpx
+gspread
