@@ -30,7 +30,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- TOKEN & WEBHOOK ---
-BOT_TOKEN = "8330450329:AAGEPd2j2a1dZ1PEJ7BrneykiZ-3Kv1T3LI"
+# Disarankan juga token ditaruh di Env Var, tapi hardcode tidak apa-apa
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8330450329:AAGEPd2j2a1dZ1PEJ7BrneykiZ-3Kv1T3LI")
 WEBHOOK_URL = "https://psbiqbal.onrender.com"
 WEBHOOK_PATH = "/telegram"
 
@@ -42,32 +43,48 @@ KPRO_SHEET_ID = "1wPeYLmInP7JlPCLZ1XYR-A75l9oHQfZ_U2R4Pc6ohVY"
 KPRO_TARGET_SHEET_NAME = "REPORT PS INDIHOME"
 KPRO_MICRO_UPDATE_SHEET_NAME = "UPDATE PER 2JAM"
 
-# --- KREDENSIAL (FIXED) ---
-PRIVATE_KEY_CLEAN = "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDM+NdoLYOO28Sr\nxxhlpR9597R+WOoMs9z/3p9zTY/0XqRJ6PQ+A0Hd1vx1RaUTfsAY0zUOtJzge89f\nSgUrPiFStMwjDbSXqWN4JwvoRGxDBWBLevUrk1FOmamIQlvyT2OzInknsMRST40e\nvb2Zn/yYMn+EbwvxJHD3AfTEf6HwUwId1suLs09KaJPccusTcaMm+pRhajapuzUy\niyqWoAacjhjY+SWU1fAKLLKxTP61Agc5qPn3HkD+rVGqxzRbXKZJpaPItMQKJ/yt\nprD+P47eDO17HoBkknmckOPBX0LoNV8G38lvqJsua48rEnQIghtyaN0exmz30ksC\nKVksZ8j7AgMBAAECggEAK3xftupxDs3xW8BRnL77fpTe5i9W+HrwWBiTG5NJBz9M\n+6FAsCdgwf/qb7bm3sv1VU754rTO05Fw3XaGwjXcO/+/j3BI8CQvxj4CeLSLg2yQ\nkXL0sNoAVfyjyxTJDQ9qx4Z4zcLi49OczPjUUNNwc5nDFAW7Mt3YWY9Arq+lW6bf\nc+YMNWjrZ7L6sdLGzl0wPuekrrzoDNgao5Bkq82y02N2SzJagRLeHPJUu8lUPWIM\nPMDnh+Nqb2Vt5WAxakFz6djiycbkgjUhplqpgrDeCzSIdcXB0xxp559hWeASW7qf\nMiZrQ5i7LLfZWVYHlVRM6lkgQJJqmpMXNWM2KWyigQKBgQDuy0F0mFh7IwXMCTZN\n+ci8pFECtwfH1EHCGDmYj7mOsqu/On43YFJx2SPK5lI/bHzrm196s9AUj9Is0bxG\ncuDd0eLAyEbobZUOUnJgikM2zXEM9/cTHfVtOHXC16wDxDvUCqUBG4xERA96j5XK\nz4f+92UVaOFRYa5GaRIYMFohRwKBgQDbvbagYzSETuQP6WCwhbOIBLoABRbkfa7t\ncCLfkxUKAs8F+tKdIR52iRwF4DnKD0DhT68NY4JGAr5S5lWhaqPhmDmrRl0ZA4Dj\n1YcY0vKb5KrVbDVtaDq1tPKatA7vFsYVNUbojJlE2FV83vW4oHRTTKcVTdriySXA\nr5UgWMxUrQKBgHjuytlnhffmhrsMN0pKI9UVSkmbs/8JibvoVNLkhs6zwbL4xo74\n4wfxNeU9u42PPbx8VWBozAp9w60bEsSCzUrJTpLfWrm/NWupaW9m1h9c79HnimNO\nGssTeuAQJXdK3BnIwkPLVcAEz+n76Zpqe68uTy0GjoWOeJoEADvr0NllAoGBAJXF\np/2HwJrRnraNrh6C8swp1JEA5wqT86/Yd5yFhpiNM4fy3qzEjxvh9hy3KQxk+ybX\nBgyNH5USd6DPZ9wecFbqR5xK2FedQLOJrYwo8713zUysdXn9yc5h5920Dl292wNH\nje4hLrJy9UmoOjk9/Ctumo91wlRDH51Gz9D9VT/9AoGBANztRXXZT4KeohHSz9V5\nE9Ue+MQ80HZn0l3aqMzW8qXYOcoxHR2R37IzRih6CjW5QW2fbiq5fA1eODDlyJ72\nwK8sRgZ3x9AVN+t3GnWvXqr9zavmqduvRmaK+nIjR8HFOFk+G5B6aajSG7/oghnT\nHrHmthDZZ7uZkzdwZjYj4wtx\n-----END PRIVATE KEY-----\n"
-
-CREDENTIALS_DICT = {
-  "type": "service_account",
-  "project_id": "decisive-router-474406-n1",
-  "private_key_id": "d0e4eff33dc9104254c76df65e5fcc17541b7849",
-  "private_key": PRIVATE_KEY_CLEAN,
-  "client_email": "provisioning@decisive-router-474406-n1.iam.gserviceaccount.com",
-  "client_id": "101251633100420416304",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/provisioning%40decisive-router-474406-n1.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
-
 # ==========================================
-# 2. FUNGSI AUTHENTIKASI GOOGLE
+# 2. LOGIKA KREDENSIAL DARI ENV
 # ==========================================
+def get_credentials_dict():
+    """Membangun dictionary kredensial dari Environment Variables Render"""
+    
+    # Ambil Private Key dari Render Environment
+    # Pastikan di Render Anda membuat env var bernama: GOOGLE_PRIVATE_KEY
+    raw_key = os.getenv("GOOGLE_PRIVATE_KEY")
+    
+    if not raw_key:
+        logger.error("❌ GOOGLE_PRIVATE_KEY tidak ditemukan di Environment Variables!")
+        return None
+
+    # FIX PENTING: Render sering mengubah newlines menjadi string literal "\n"
+    # Kita harus kembalikan menjadi karakter enter yang asli.
+    clean_key = raw_key.replace("\\n", "\n")
+
+    return {
+      "type": "service_account",
+      "project_id": "decisive-router-474406-n1",
+      "private_key_id": "d0e4eff33dc9104254c76df65e5fcc17541b7849",
+      "private_key": clean_key, # Menggunakan key dari Env
+      "client_email": "provisioning@decisive-router-474406-n1.iam.gserviceaccount.com",
+      "client_id": "101251633100420416304",
+      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+      "token_uri": "https://oauth2.googleapis.com/token",
+      "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+      "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/provisioning%40decisive-router-474406-n1.iam.gserviceaccount.com",
+      "universe_domain": "googleapis.com"
+    }
+
 def get_gspread_client():
     if not HAS_GSPREAD: 
         logger.error("❌ Library 'gspread' TIDAK DITEMUKAN. Cek requirements.txt")
         return None
     try:
-        gc = gspread.service_account_from_dict(CREDENTIALS_DICT)
+        creds_dict = get_credentials_dict()
+        if not creds_dict:
+            return None
+            
+        gc = gspread.service_account_from_dict(creds_dict)
         return gc
     except Exception as e:
         logger.error(f"❌ Google Auth Gagal: {e}", exc_info=True)
@@ -111,7 +128,7 @@ def create_summary_text(status_counts: pd.Series) -> str:
 def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
     fig, ax = plt.subplots(figsize=(10, 3)); ax.axis('off')
     fig.suptitle(f"NO DATA - {report_timestamp.strftime('%d %b %Y')}", fontsize=16)
-    img = io.BytesIO(); plt.savefig(img, format='png'); img.seek(0); plt.close(fig); return img
+    img = io.BytesIO(); plt.savefig(img, format='png', dpi=150); img.seek(0); plt.close(fig); return img
 
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
     # --- LOGIKA DASHBOARD ASLI ---
@@ -206,7 +223,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
 # 4. LOGIKA INTEGRASI KPRO (Google Sheet)
 # ==========================================
 async def process_kpro_logic(raw_df):
-    # PERBAIKAN: Inisialisasi variabel di awal untuk mencegah UnboundLocalError
+    # PERBAIKAN: Variabel didefinisikan di awal agar tidak error "UnboundLocal"
     msg = []
     wonum_details = {}
 
@@ -214,7 +231,7 @@ async def process_kpro_logic(raw_df):
     
     # 1. Login
     client = get_gspread_client()
-    if not client: return False, "⚠️ Gagal Login Google. Cek format Key/Library.", {}
+    if not client: return False, "⚠️ Gagal Login Google. Cek Env Var 'GOOGLE_PRIVATE_KEY'.", {}
 
     wib_tz = timezone(timedelta(hours=7)); today = datetime.now(wib_tz).date()
     yesterday = today - timedelta(days=1); seven_days = today - timedelta(days=6)
@@ -300,7 +317,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         for c in cols: 
             if c in df.columns: df[c] = df[c].astype(str).str.upper().str.strip()
 
-        # 1. Image Dashboard (Original)
+        # 1. Image Dashboard
         df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
         valid = df.dropna(subset=['STATUSDATE'])
         if not valid.empty:
