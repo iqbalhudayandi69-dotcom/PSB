@@ -514,7 +514,7 @@ async def _update_checkpoint_sheet(kpi_data: dict) -> str:
             sheet.update_cells(cells_to_update, value_input_option='USER_ENTERED')
             return f"✅ Berhasil! {len(cells_to_update)} sel telah diperbarui di '{KPRO_TARGET_SHEET_NAME}'.\n{KPRO_TARGET_SHEET_URL}"
         else:
-            return ⚠️ Tidak ada data baru untuk diperbarui (mungkin STO di file tidak cocok dengan target)."
+            return  Tidak ada data baru untuk diperbarui (mungkin STO di file tidak cocok dengan target)."
 
     except Exception as e:
         logger.error(f"Failed to update checkpoint sheet: {e}", exc_info=True)
@@ -1020,7 +1020,7 @@ async def process_kpro_logic(raw_df):
     # 1. Login
     client = get_gspread_client()
     if not client: 
-        return False, "⚠️ Gagal Login Google. Cek log server untuk detail error (Library/Key).", {}
+        return False, " Gagal Login Google. Cek log server untuk detail error (Library/Key).", {}
 
     msg = []
     wib_tz = timezone(timedelta(hours=7)); today = datetime.now(wib_tz).date()
