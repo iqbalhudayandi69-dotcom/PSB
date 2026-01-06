@@ -38,8 +38,7 @@ WEBHOOK_PATH = "/telegram"
 # --- PENGATURAN GOOGLE SHEET ---
 ENABLE_GOOGLE_SHEETS = True
 
-# --- KREDENSIAL DALAM FORMAT DICTIONARY (LEBIH STABIL) ---
-# Saya sudah merapikan format Private Key agar terbaca benar oleh Python
+# --- KREDENSIAL (FIXED DICTIONARY FORMAT) ---
 GOOGLE_CREDENTIALS_DICT = {
   "type": "service_account",
   "project_id": "decisive-router-474406-n1",
@@ -59,13 +58,13 @@ KPRO_TARGET_SHEET_NAME = "REPORT PS INDIHOME"
 KPRO_MICRO_UPDATE_SHEET_NAME = "UPDATE PER 2JAM"
 
 # ==========================================
-# 2. FUNGSI AUTHENTIKASI GOOGLE (DIPERBAIKI)
+# 2. FUNGSI AUTHENTIKASI GOOGLE
 # ==========================================
 def get_gspread_client():
     if not HAS_GSPREAD: return None
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
-        # Menggunakan from_json_keyfile_dict lebih stabil daripada string JSON
+        # Menggunakan Dictionary langsung (Lebih aman dari error format)
         creds = ServiceAccountCredentials.from_json_keyfile_dict(GOOGLE_CREDENTIALS_DICT, scope)
         return gspread.authorize(creds)
     except Exception as e:
@@ -86,7 +85,7 @@ KPRO_MICRO_COLUMN_INDEX_MAP = {
 }
 
 # ==========================================
-# 3. DASHBOARD RAPI (PERBAIKAN TAMPILAN)
+# 3. DASHBOARD (VERSI ASLI/ORIGINAL)
 # ==========================================
 def create_summary_text(status_counts: pd.Series) -> str:
     def get_count(s): return status_counts.get(s, 0)
@@ -97,7 +96,8 @@ def create_summary_text(status_counts: pd.Series) -> str:
     kendala = get_count('WORKFAIL')
     est_ps = ps + acom
     return (
-        f"Ringkasan Metrik Harian:\n--------------------------------------\n"
+        f"Ringkasan Metrik Harian:\n"
+        f"--------------------------------------\n"
         f"PS (COMPWORK)                 = {ps}\n"
         f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
         f"PI (STARTWORK)                  = {pi}\n"
@@ -106,134 +106,108 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
 
+def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
+    fig, ax = plt.subplots(figsize=(10, 3)); ax.axis('off')
+    fig.suptitle(f"NO DATA - {report_timestamp.strftime('%d %b %Y')}", fontsize=16)
+    img = io.BytesIO(); plt.savefig(img, format='png'); img.seek(0); plt.close(fig); return img
+
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
-    # 1. Persiapan Data
+    # --- LOGIKA DASHBOARD ASLI (TIDAK DIRUBAH TAMPILANNYA) ---
     stos = sorted(daily_df['STO'].unique())
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
-    unique_statuses = daily_df['STATUS'].unique()
+    unique_statuses_in_data = daily_df['STATUS'].unique()
     
     for status in status_order:
-        if status not in unique_statuses: continue
+        if status not in unique_statuses_in_data: continue
         status_df = daily_df[daily_df['STATUS'] == status]
-        
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
-        
-        table_data.append(row_data)
-        row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
+        table_data.append(row_data); row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
         if status == 'WORKFAIL':
             for error_code, error_group in status_df.groupby('ERRORCODE'):
                 if str(error_code).upper() in ['NAN', 'N/A']: continue
-                error_row = {'KATEGORI': f"   ↳ {error_code}"} # Indentasi visual
+                error_row = {'KATEGORI': f"  ↳ {error_code}"}
                 for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
-                table_data.append(error_row); row_styles[len(table_data) - 1] = {'level': 2, 'status': status}
-                
+                table_data.append(error_row); row_styles[len(table_data) - 1] = {'level': 2, 'status': status, 'error': error_code}
                 for sub_e, sub_g in error_group.groupby('SUBERRORCODE'):
                     if str(sub_e).upper() in ['NAN', 'N/A']: continue
-                    sub_row = {'KATEGORI': f"      → {sub_e}"} # Indentasi lebih dalam
+                    sub_row = {'KATEGORI': f"    → {sub_e}"}
                     for sto in stos: sub_row[sto] = len(sub_g[sub_g['STO'] == sto])
                     if sum(list(sub_row.values())[1:]) > 0:
                         table_data.append(sub_row); row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
-    if not table_data:
-        fig, ax = plt.subplots(figsize=(10, 2)); ax.axis('off')
-        fig.suptitle(f"TIDAK ADA DATA RELEVAN", fontsize=14)
-        img = io.BytesIO(); plt.savefig(img, format='png'); img.seek(0); plt.close(fig); return img
+    if not table_data: return create_empty_dashboard(report_timestamp)
 
-    # 2. DataFrame untuk Tabel
     display_df = pd.DataFrame(table_data, columns=['KATEGORI'] + stos).fillna(0)
-    display_df['Total'] = display_df[stos].sum(axis=1) # Ganti nama jadi Total (lebih pendek)
+    display_df['Grand Total'] = display_df[stos].sum(axis=1)
     
-    # 3. Setup Gambar (Layout Lebih Rapi)
-    # Menambah tinggi per baris agar tidak gepeng
-    row_height = 0.6 
-    header_height = 1.5
-    footer_height = 4
-    total_height = (len(display_df) * row_height) + header_height + footer_height
+    relevant_statuses = [row['KATEGORI'] for row in table_data if row_styles.get(table_data.index(row), {}).get('level') == 1]
+    total_source_df = daily_df[daily_df['STATUS'].isin(relevant_statuses)]
+    grand_total_row = {'KATEGORI': 'Grand Total'}
+    for sto in stos: grand_total_row[sto] = len(total_source_df[total_source_df['STO'] == sto])
+    grand_total_row['Grand Total'] = len(total_source_df)
     
-    fig = plt.figure(figsize=(14, total_height)) # Lebar ditambah jadi 14
-    gs = fig.add_gridspec(3, 1, height_ratios=[header_height, len(display_df), footer_height])
+    display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+    row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
+
+    # Visualisasi Matplotlib (Style Lama)
+    num_rows = len(display_df)
+    fig_height = num_rows * 0.5 + 4.5
+    fig = plt.figure(figsize=(12, fig_height))
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 5])
     
     ax_title = fig.add_subplot(gs[0]); ax_title.axis('off')
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
-    # Judul
-    ax_title.text(0.01, 0.5, f"REPORT DAILY ENDSTATE JAKPUS\n{report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
-                  ha='left', va='center', fontsize=18, weight='bold', color='#2F3E46')
+    ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
+                  ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
-    # 4. Membuat Tabel dengan Lebar Kolom Dinamis
-    # KATEGORI dapat 40% lebar, sisanya dibagi rata untuk STO + Total
-    num_cols = len(display_df.columns)
-    col_width_kategori = 0.4
-    col_width_others = (1.0 - col_width_kategori) / (num_cols - 1)
-    col_widths = [col_width_kategori] + [col_width_others] * (num_cols - 1)
-
-    table = ax_table.table(cellText=display_df.values, colLabels=display_df.columns, 
+    col_widths = [0.35] + [0.08] * (len(stos) + 1)
+    table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
                            loc='center', cellLoc='center', colWidths=col_widths)
-    
-    # Styling Tabel
-    table.auto_set_font_size(False)
-    table.set_fontsize(11) # Font agak diperbesar
-    table.scale(1, 2.5) # Scale y diperbesar agar baris lebih tinggi (padding)
+    table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
-    # Warna & Format
     color_map = {
-        'COMPWORK': '#E8F5E9', 'ACOMP': '#F1F8E9', 'VALCOMP': '#F1F8E9', 'VALSTART': '#F1F8E9',
-        'WORKFAIL': '#FFEBEE', 'KENDALA_ERROR': '#FFF3E0', 'STARTWORK': '#FFFDE7',
-        'CANCLWORK': '#FFEBEE', 'Total': '#EEEEEE'
+        'COMPWORK': ('#556B2F', 'white'), 'ACOMP': ('#9ACD32', 'black'), 'VALCOMP': ('#9ACD32', 'black'), 
+        'VALSTART': ('#9ACD32', 'black'), 'WORKFAIL': ('#FF8C00', 'white'), 'KENDALA_ERROR': ('#FFDAB9', 'black'), 
+        'STARTWORK': ('#FFFACD', 'black'), 'CANCLWORK': ('#DC143C', 'white'), 'Total': ('#F5F5F5', 'black')
     }
     
     for (row_idx, col_idx), cell in table.get_celld().items():
-        cell.set_edgecolor('#BDBDBD')
-        cell.set_linewidth(0.5)
-        
-        # Header
+        cell.set_edgecolor('#D3D3D3'); cell.set_linewidth(0.8)
         if row_idx == 0:
-            cell.set_facecolor('#37474F')
-            cell.set_text_props(color='white', weight='bold')
-            cell.set_height(0.08)
+            cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold')
             continue
         
-        # Data Rows
-        style = row_styles.get(row_idx - 1, {})
+        style = row_styles.get(row_idx - 1, {}); data_row = display_df.iloc[row_idx - 1]
+        bg_color, text_color = 'white', 'black'
         status_key = style.get('status')
-        level = style.get('level', 1)
+        if style.get('level') == 2 and status_key == 'WORKFAIL': status_key = 'KENDALA_ERROR'
+        if status_key in color_map: bg_color, text_color = color_map[status_key]
         
-        # Warna Background
-        bg_color = 'white'
-        if level == 2 and status_key == 'WORKFAIL': status_key = 'KENDALA_ERROR'
-        if status_key in color_map: bg_color = color_map[status_key]
+        cell.set_facecolor(bg_color); cell.get_text().set_color(text_color)
+
+        if col_idx > 0:
+            val = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
+            cell.get_text().set_text(f"{val:,.0f}" if pd.notna(val) and val > 0 else "")
+            cell.set_text_props(ha='center', va='center', weight='bold')
+        else:
+            cell.get_text().set_text(data_row.iloc[col_idx])
+            cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
         
-        # Zebra Striping untuk sub-level agar beda
-        if level > 1: cell.set_facecolor('#FAFAFA')
-        else: cell.set_facecolor(bg_color)
-
-        # Formatting Teks
-        if col_idx == 0: # Kolom Kategori
-            cell.set_text_props(ha='left', weight='bold' if level==1 else 'normal')
-            cell.PAD = 0.05
-        else: # Kolom Angka
-            try:
-                val = int(float(cell.get_text().get_text()))
-                cell.get_text().set_text(f"{val:,}".replace(',', '.')) # Format Ribuan (indo style)
-                if val == 0: cell.get_text().set_color('#CFD8DC') # Angka 0 diabu-abukan
-            except: pass
-            cell.set_text_props(ha='center', weight='bold')
-
-    # Ringkasan Text di Bawah
-    ax_text.text(0.01, 0.9, create_summary_text(status_counts), ha='left', va='top', fontsize=12, family='monospace')
+        if style.get('level') == 3: cell.get_text().set_style('italic')
     
-    img = io.BytesIO()
-    plt.savefig(img, format='png', dpi=150, bbox_inches='tight', pad_inches=0.3)
-    img.seek(0); plt.close(fig)
+    ax_text.text(0.05, 0.9, create_summary_text(status_counts), ha='left', va='top', fontsize=10, family='monospace')
+    
+    img = io.BytesIO(); plt.savefig(img, format='png', dpi=200); img.seek(0); plt.close(fig)
     return img
 
 # ==========================================
-# 4. LOGIKA INTEGRASI KPRO
+# 4. LOGIKA INTEGRASI KPRO (Google Sheet)
 # ==========================================
 async def process_kpro_logic(raw_df):
     if not ENABLE_GOOGLE_SHEETS: return False, "", {}
@@ -324,7 +298,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         for c in cols: 
             if c in df.columns: df[c] = df[c].astype(str).str.upper().str.strip()
 
-        # 1. Image Dashboard
+        # 1. Image Dashboard (ORIGINAL STYLE)
         df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
         valid = df.dropna(subset=['STATUSDATE'])
         if not valid.empty:
@@ -354,6 +328,18 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     est_txt.append(f"{sto}: TSEL={tsel}, PDA={pda}")
                 est_txt.append(f"TOTAL: TSEL={tot_t}, PDA={tot_p}")
                 await update.message.reply_text("\n".join(est_txt))
+                
+                # Micro Detail
+                micro_txt = ["🔍 *Detail Micro*"]
+                for sto, stats in details.items():
+                    if stats:
+                        micro_txt.append(f"\n__{sto}__")
+                        for s, n in stats.items(): micro_txt.append(f"{s} ({len(n)}): {', '.join(map(str, n))}")
+                
+                full_m = "\n".join(micro_txt)
+                if len(full_m) > 4000:
+                    for i in range(0, len(full_m), 4000): await update.message.reply_text(full_m[i:i+4000])
+                else: await update.message.reply_text(full_m)
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
