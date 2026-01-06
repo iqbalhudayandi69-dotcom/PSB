@@ -1173,5 +1173,3 @@ app = FastAPI(lifespan=lifespan)
 async def webhook(req: Request):
     await ptb.process_update(Update.de_json(await req.json(), ptb.bot))
     return Response(status_code=200)
-@app.get("/")
-async def root(): return {"status": "ok"}
