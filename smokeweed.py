@@ -38,13 +38,11 @@ WEBHOOK_PATH = "/telegram"
 ENABLE_GOOGLE_SHEETS = True
 
 # --- ID SHEET ---
-# Menggunakan ID lebih stabil daripada URL
 KPRO_SHEET_ID = "1wPeYLmInP7JlPCLZ1XYR-A75l9oHQfZ_U2R4Pc6ohVY"
 KPRO_TARGET_SHEET_NAME = "REPORT PS INDIHOME"
 KPRO_MICRO_UPDATE_SHEET_NAME = "UPDATE PER 2JAM"
 
 # --- KREDENSIAL (FIXED) ---
-# Private key dibersihkan agar terbaca oleh Python dengan benar
 PRIVATE_KEY_CLEAN = "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC4qN8oPT0p2ovQ\n1KzlX1nvglftOpG7F6gKW72mukaVtYUdx6Vw0FZZk3f0CCGXkdbt2aPtuH5H3JEy\nDlJYDhS1yVl/AyyPrFZHdvvt8J2CWlGEJr4ke+fvWacix4U7/woXRK69TIuOIiKo\nI7Wyj1vhWzxRU6N+L7QRis4Etcc1pbzWwFNuFYaW4vm8YxWrvV8+TOJ76DlZix8Y\nGljabsuq1sVmVggjr2o7+5sRu7BSbPoRbvrTKGmDbEFL1KOcv0OVrkJp1nofFnlb\nIHiG92gYQXubU1qaV5ujTZDs39slcwjyl0JjV6iTAmQX8VsAwFZo46hdJHm/Q93g\nk4Fwldj3AgMBAAECggEAAdOIaCVO57flyRoetE1gnin2WlN0IdsRNOUFDP3ro8sT\nTCDvhcbxtloV23Usdot2ijdW/otkEwGJ8r+fLd1vHqslS53JljQt+EVOJuN0fgJh\nqwJtFVRKY3IfYTctnf3Jk5hWIsDRN9smPO55e2YdPQSCJgsYjgTFGE/8oKGhnOoI\nlUAzrQ3GQvysyxFXCHINGUC2kLxzK3i244ApozUzUZ0z40mBcGfg8DNa4j4SNohD\n0nud+piFI489v5uN4EX9RdmPRr/SEWBChZ/iYLDgXYdU2cDyx+hnXWSiugycWLZi\nPXAEXzhoENrCsp5B1AjhmPG0T7LjAj721lHeEtOLaQKBgQDakx5wic47Q0V7L1fb\n8Fuic39+vCw94DEaPvRJH1LEtf1xmulkse4zFUWQC2AOJFw4ptp+7/zoXPOwkWJi\nX9SFGXm4sNihXhwfewW/Iy6w/RioCAZ3+6CC5eC6z6JxzCQCM2+8cFmxJNii6By6\njjq67Hcregi09pwBpyjPb6OoPwKBgQDYRyPsRRA0UM9HwMv9+u/n2r2pviYAHOku\nbn06LKifWkeFPAez3sUYUCHEnhs07r+26vdODcKdny26+6B4u2xWrJaR5Q6jjdUz\nBHpNu8KBXPlpwh3fDmp/k1yYfkRMdHhRh9MC3DzZgfrMsEa5vb6xV/ffqlp8QZcK\nps5EdRVhSQKBgBkwtWRg7Wy1Dw/oX+bQJ69sQjhX9X1YFjChKsQ2oPJcyw3JvbZG\nL16hx/eW6AYZOKuqxymz/ODGvasOxljyFGsWiYm4j+7hCrqyEfJ6Woo5URskeaJg\nVJphZeoBvgYBcfDy/qCoDh41UeZMe+sgMzKRyBYxpUk91rL2EeT+R80/AoGBAK/7\n2ygy3kejhba+E387xCCmJfRL7EHlRHxqnW1Lz32zCUVJnn7nAvuQoJmLiVnd95PQ\nx6D0o2p8jsp6W45B+5rfXrmiZ/H/w/56Y0aDRHbc/3nl4UaSRWg/sXXIMK0BjLHS\n0omeSck28avCuBoFYniNuv19cZlwCYY6Stb7aoU5AoGBALSPOapJbt4dspw0rLVN\neLF6tQW+Lcx36Bsb7VEmk/Mu28HlKmbtjyJa8dAPbNETXPQp5PpLKoOeTqAwApoM\nGY5RfG/fF+RWiTNEZW4+pLFmCmfOeAMNubRjiMQiFNclssZkeFYPeNsfSAMvYdhH\nsc9LMtN36jTejK+XSCNuERJQ\n-----END PRIVATE KEY-----\n"
 
 CREDENTIALS_DICT = {
@@ -68,9 +66,7 @@ def get_gspread_client():
     if not HAS_GSPREAD: 
         logger.error("❌ Library 'gspread' TIDAK DITEMUKAN. Cek requirements.txt")
         return None
-    
     try:
-        # Menggunakan metode service_account_from_dict (Paling Stabil)
         gc = gspread.service_account_from_dict(CREDENTIALS_DICT)
         return gc
     except Exception as e:
@@ -91,7 +87,7 @@ KPRO_MICRO_COLUMN_INDEX_MAP = {
 }
 
 # ==========================================
-# 3. DASHBOARD (LOGIKA & TAMPILAN ASLI)
+# 3. DASHBOARD (TAMPILAN ASLI)
 # ==========================================
 def create_summary_text(status_counts: pd.Series) -> str:
     def get_count(s): return status_counts.get(s, 0)
@@ -115,10 +111,10 @@ def create_summary_text(status_counts: pd.Series) -> str:
 def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
     fig, ax = plt.subplots(figsize=(10, 3)); ax.axis('off')
     fig.suptitle(f"NO DATA - {report_timestamp.strftime('%d %b %Y')}", fontsize=16)
-    img = io.BytesIO(); plt.savefig(img, format='png', dpi=150); img.seek(0); plt.close(fig); return img
+    img = io.BytesIO(); plt.savefig(img, format='png'); img.seek(0); plt.close(fig); return img
 
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
-    # --- LOGIKA DASHBOARD ASLI (Tidak Dirubah) ---
+    # --- LOGIKA DASHBOARD ASLI ---
     stos = sorted(daily_df['STO'].unique())
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
@@ -210,13 +206,16 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
 # 4. LOGIKA INTEGRASI KPRO (Google Sheet)
 # ==========================================
 async def process_kpro_logic(raw_df):
+    # PERBAIKAN: Inisialisasi variabel di awal untuk mencegah UnboundLocalError
+    msg = []
+    wonum_details = {}
+
     if not ENABLE_GOOGLE_SHEETS: return False, "", {}
     
     # 1. Login
     client = get_gspread_client()
     if not client: return False, "⚠️ Gagal Login Google. Cek format Key/Library.", {}
 
-    msg = []
     wib_tz = timezone(timedelta(hours=7)); today = datetime.now(wib_tz).date()
     yesterday = today - timedelta(days=1); seven_days = today - timedelta(days=6)
     
@@ -256,7 +255,7 @@ async def process_kpro_logic(raw_df):
         # 4. Micro Update
         ws_micro = sh.worksheet(KPRO_MICRO_UPDATE_SHEET_NAME)
         micro_updates = []
-        wonum_details = {}
+        
         today_df = raw_df[raw_df['STATUSDATE'].dt.date == today]
         
         for sto, row in KPRO_MICRO_STO_ROW_MAP.items():
@@ -314,6 +313,7 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         # 2. Google Sheets
         if ENABLE_GOOGLE_SHEETS:
+            # Panggil fungsi yang sudah di-fix
             _, log, details = await process_kpro_logic(df)
             if log: await update.message.reply_text(log)
             
