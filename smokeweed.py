@@ -125,13 +125,9 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"EST PS (PS+ACOM)                = {est_ps}"
     )
 
-def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
-    fig, ax = plt.subplots(figsize=(10, 3)); ax.axis('off')
-    fig.suptitle(f"NO DATA - {report_timestamp.strftime('%d %b %Y')}", fontsize=16)
-    img = io.BytesIO(); plt.savefig(img, format='png', dpi=150); img.seek(0); plt.close(fig); return img
-
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
-    # --- LOGIKA DASHBOARD ASLI ---
+    
+    # --- 1. Persiapan Data (Logic from Current/False Code) ---
     stos = sorted(daily_df['STO'].unique())
     status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
@@ -140,23 +136,32 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     
     for status in status_order:
         if status not in unique_statuses_in_data: continue
+            
         status_df = daily_df[daily_df['STATUS'] == status]
+        
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
-        table_data.append(row_data); row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
+        
+        table_data.append(row_data)
+        row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
         if status == 'WORKFAIL':
             for error_code, error_group in status_df.groupby('ERRORCODE'):
+                # Robust check from Current Code
                 if str(error_code).upper() in ['NAN', 'N/A']: continue
+                
                 error_row = {'KATEGORI': f"  ↳ {error_code}"}
                 for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
-                table_data.append(error_row); row_styles[len(table_data) - 1] = {'level': 2, 'status': status, 'error': error_code}
-                for sub_e, sub_g in error_group.groupby('SUBERRORCODE'):
-                    if str(sub_e).upper() in ['NAN', 'N/A']: continue
-                    sub_row = {'KATEGORI': f"    → {sub_e}"}
-                    for sto in stos: sub_row[sto] = len(sub_g[sub_g['STO'] == sto])
-                    if sum(list(sub_row.values())[1:]) > 0:
-                        table_data.append(sub_row); row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
+                table_data.append(error_row)
+                row_styles[len(table_data) - 1] = {'level': 2, 'status': status, 'error': error_code}
+
+                for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
+                    if str(sub_error_code).upper() in ['NAN', 'N/A']: continue
+                    sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
+                    for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
+                    if sum(list(sub_error_row.values())[1:]) > 0:
+                        table_data.append(sub_error_row)
+                        row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
     if not table_data: return create_empty_dashboard(report_timestamp)
 
@@ -172,21 +177,27 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
+    # --- 2. Visualisasi (Formatting from Correct Output) ---
     num_rows = len(display_df)
+    # Dynamic height calculation
     fig_height = num_rows * 0.5 + 4.5
+    
     fig = plt.figure(figsize=(12, fig_height))
+    # GridSpec ratios to ensure table fits comfortably
     gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 5])
     
     ax_title = fig.add_subplot(gs[0]); ax_title.axis('off')
     ax_table = fig.add_subplot(gs[1]); ax_table.axis('off')
     ax_text = fig.add_subplot(gs[2]); ax_text.axis('off')
     
+    # Title Formatting
     ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
     col_widths = [0.35] + [0.08] * (len(stos) + 1)
     table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
                            loc='center', cellLoc='center', colWidths=col_widths)
+    # Scaling to match correct output
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
     color_map = {
@@ -200,24 +211,48 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         if row_idx == 0:
             cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold')
             continue
+        
         style = row_styles.get(row_idx - 1, {}); data_row = display_df.iloc[row_idx - 1]
+        
         bg_color, text_color = 'white', 'black'
         status_key = style.get('status')
         if style.get('level') == 2 and status_key == 'WORKFAIL': status_key = 'KENDALA_ERROR'
         if status_key in color_map: bg_color, text_color = color_map[status_key]
+        
         cell.set_facecolor(bg_color); cell.get_text().set_color(text_color)
+
         if col_idx > 0:
-            val = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
-            cell.get_text().set_text(f"{val:,.0f}" if pd.notna(val) and val > 0 else "")
+            numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
+            cell.get_text().set_text(f"{numeric_value:,.0f}" if pd.notna(numeric_value) and numeric_value > 0 else "")
             cell.set_text_props(ha='center', va='center', weight='bold')
         else:
             cell.get_text().set_text(data_row.iloc[col_idx])
             cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
+        
         if style.get('level') == 3: cell.get_text().set_style('italic')
     
+    # Summary text
     ax_text.text(0.05, 0.9, create_summary_text(status_counts), ha='left', va='top', fontsize=10, family='monospace')
-    img = io.BytesIO(); plt.savefig(img, format='png', dpi=200); img.seek(0); plt.close(fig)
-    return img
+    
+    # CRITICAL: tight_layout fixes the sizing issues
+    plt.tight_layout()
+    
+    image_buffer = io.BytesIO()
+    plt.savefig(image_buffer, format='png', dpi=200)
+    image_buffer.seek(0)
+    plt.close(fig)
+    return image_buffer
+
+def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
+    fig, ax = plt.subplots(figsize=(10, 3))
+    ax.axis('off')
+    fig.suptitle(f"NO DATA - {report_timestamp.strftime('%d %b %Y')}", fontsize=16)
+    plt.tight_layout()
+    image_buffer = io.BytesIO()
+    plt.savefig(image_buffer, format='png', dpi=150)
+    image_buffer.seek(0)
+    plt.close(fig)
+    return image_buffer
 
 # ==========================================
 # 4. LOGIKA INTEGRASI KPRO (Google Sheet)
