@@ -123,7 +123,7 @@ def create_summary_text(status_counts: pd.Series) -> str:
         f"Ringkasan Metrik Harian:\n"
         f"--------------------------------------\n"
         f"PS (COMPWORK)                 = {ps}\n"
-        f"ACOM (ACOMP+VALSTART+VALCOMP) = {acom}\n"
+        f"ACOM (ACOMP+ACTCOMP+VALSTART+VALCOMP) = {acom}\n"
         f"PI (STARTWORK)                  = {pi}\n"
         f"PI PROGRESS (INSTCOMP+PENDWORK+CONTWORK) = {pi_progress}\n"
         f"KENDALA (WORKFAIL)              = {kendala}\n"
