@@ -251,7 +251,7 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
     # --- 1. Persiapan Data ---
     stos = sorted(daily_df['STO'].unique())
-    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
+    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'ACTCOMP', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
     table_data, row_styles = [], {}
     unique_statuses_in_data = daily_df['STATUS'].unique()
