@@ -114,7 +114,7 @@ def create_summary_text(status_counts: pd.Series) -> str:
     """Helper untuk text ringkasan di dalam Gambar"""
     def get_count(s): return status_counts.get(s, 0)
     ps = get_count('COMPWORK')
-    acom = get_count('ACOMP') + get_count('VALSTART') + get_count('VALCOMP')
+    acom = get_count('ACOMP') + get_count('VALSTART') + get_count('ACTCOMP') + get_count('VALCOMP')
     pi = get_count('STARTWORK')
     pi_progress = get_count('INSTCOMP') + get_count('CONTWORK') + get_count('PENDWORK')
     kendala = get_count('WORKFAIL')
@@ -161,7 +161,7 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
     
     # B. Aktivasi HI (Status Date Hari Ini)
     fo_aktivasi = len(df_today[df_today['STATUS'].isin(['CONTWORK', 'INSTCOMP', 'PENDWORK'])])
-    acom = len(df_today[df_today['STATUS'].isin(['VALSTART', 'ACOMP', 'VALCOMP'])])
+    acom = len(df_today[df_today['STATUS'].isin(['VALSTART', 'ACOMP', 'ACTCOMP', 'VALCOMP'])])
     ps_hi = len(df_today[df_today['STATUS'] == 'COMPWORK'])
     estimasi_ps = ps_hi + acom
     
@@ -317,7 +317,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
     color_map = {
-        'COMPWORK': ('#556B2F', 'white'), 'ACOMP': ('#9ACD32', 'black'), 'VALCOMP': ('#9ACD32', 'black'), 
+        'COMPWORK': ('#556B2F', 'white'), 'ACOMP': ('#9ACD32', 'black'), 'ACTCOMP': ('#9ACD32', 'black'), 'VALCOMP': ('#9ACD32', 'black'),  
         'VALSTART': ('#9ACD32', 'black'), 'WORKFAIL': ('#FF8C00', 'white'), 'KENDALA_ERROR': ('#FFDAB9', 'black'), 
         'STARTWORK': ('#FFFACD', 'black'), 'CANCLWORK': ('#DC143C', 'white'), 'Total': ('#F5F5F5', 'black')
     }
