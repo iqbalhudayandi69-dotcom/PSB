@@ -47,6 +47,7 @@ KPRO_RAW_DATA_SHEET_NAME = "DATA KPRO"  # <--- TAB UNTUK DATA MENTAH
 # 2. LOGIKA KREDENSIAL DARI ENV
 # ==========================================
 def get_credentials_dict():
+    """Membangun dictionary kredensial dari Environment Variables Render"""
     raw_key = os.getenv("GOOGLE_PRIVATE_KEY")
     if not raw_key:
         logger.error("❌ GOOGLE_PRIVATE_KEY tidak ditemukan di Environment Variables!")
@@ -165,15 +166,17 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
     
     total_wo_mtd = len(df_mtd_created)
     ps_mtd = len(df_mtd_ps)
+    
     ps_re_mtd_pct = 0.0
     if total_wo_mtd > 0:
         ps_re_mtd_pct = (ps_mtd / total_wo_mtd) * 100
 
+    header_date = format_indo_date(current_dt)
     last_update_str = current_dt.strftime('%d/%m/%y %H:%M')
 
     report_text = (
         f"Fulfillment Endstate Witel JAKPUS\n"
-        f"{format_indo_date(current_dt)}\n"
+        f"{header_date}\n"
         f"--------------------\n\n"
         f"Total WO: {total_wo_hi}\n\n"
         f"Aktivasi HI\n"
@@ -198,6 +201,7 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
         f"* PS/RE MTD: {ps_re_mtd_pct:.1f}%\n\n"
         f"Last Update BIMA: {last_update_str}"
     )
+    
     return report_text
 
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
@@ -209,9 +213,12 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     
     for status in status_order:
         if status not in unique_statuses_in_data: continue
+            
         status_df = daily_df[daily_df['STATUS'] == status]
+        
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
+        
         table_data.append(row_data); row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
         if status == 'WORKFAIL':
@@ -221,12 +228,14 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
                 for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
                 table_data.append(error_row)
                 row_styles[len(table_data) - 1] = {'level': 2, 'status': status, 'error': error_code}
-                for sub_e, sub_g in error_group.groupby('SUBERRORCODE'):
-                    if str(sub_e).upper() in['NAN', 'N/A']: continue
-                    sub_row = {'KATEGORI': f"    → {sub_e}"}
-                    for sto in stos: sub_row[sto] = len(sub_g[sub_g['STO'] == sto])
-                    if sum(list(sub_row.values())[1:]) > 0:
-                        table_data.append(sub_row); row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
+
+                for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
+                    if str(sub_error_code).upper() in['NAN', 'N/A']: continue
+                    sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
+                    for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
+                    if sum(list(sub_error_row.values())[1:]) > 0:
+                        table_data.append(sub_error_row)
+                        row_styles[len(table_data) - 1] = {'level': 3, 'status': status}
 
     if not table_data: return create_empty_dashboard(report_timestamp)
 
@@ -244,6 +253,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
 
     num_rows = len(display_df)
     fig_height = num_rows * 0.5 + 4.5
+    
     fig = plt.figure(figsize=(12, fig_height))
     gs = fig.add_gridspec(3, 1, height_ratios=[1.5, num_rows, 5])
     
@@ -268,31 +278,43 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     for (row_idx, col_idx), cell in table.get_celld().items():
         cell.set_edgecolor('#D3D3D3'); cell.set_linewidth(0.8)
         if row_idx == 0:
-            cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold'); continue
+            cell.set_facecolor('#404040'); cell.set_text_props(color='white', weight='bold')
+            continue
         
         style = row_styles.get(row_idx - 1, {}); data_row = display_df.iloc[row_idx - 1]
+        
         bg_color, text_color = 'white', 'black'
         status_key = style.get('status')
         if style.get('level') == 2 and status_key == 'WORKFAIL': status_key = 'KENDALA_ERROR'
         if status_key in color_map: bg_color, text_color = color_map[status_key]
         
         cell.set_facecolor(bg_color); cell.get_text().set_color(text_color)
+
         if col_idx > 0:
             numeric_value = pd.to_numeric(data_row.iloc[col_idx], errors='coerce')
             cell.get_text().set_text(f"{numeric_value:,.0f}" if pd.notna(numeric_value) and numeric_value > 0 else "")
             cell.set_text_props(ha='center', va='center', weight='bold')
         else:
-            cell.get_text().set_text(data_row.iloc[col_idx]); cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
+            cell.get_text().set_text(data_row.iloc[col_idx])
+            cell.set_text_props(ha='left', va='center', weight='bold'); cell.PAD = 0.05
+        
         if style.get('level') == 3: cell.get_text().set_style('italic')
     
     ax_text.text(0.05, 0.9, create_summary_text(status_counts), ha='left', va='top', fontsize=10, family='monospace')
-    plt.tight_layout(); image_buffer = io.BytesIO(); plt.savefig(image_buffer, format='png', dpi=200); image_buffer.seek(0); plt.close(fig)
+    
+    plt.tight_layout()
+    image_buffer = io.BytesIO()
+    plt.savefig(image_buffer, format='png', dpi=200); image_buffer.seek(0); plt.close(fig)
     return image_buffer
 
 def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
-    fig, ax = plt.subplots(figsize=(10, 3)); ax.axis('off')
+    fig, ax = plt.subplots(figsize=(10, 3))
+    ax.axis('off')
     fig.suptitle(f"NO DATA - {report_timestamp.strftime('%d %b %Y')}", fontsize=16)
-    plt.tight_layout(); img = io.BytesIO(); plt.savefig(img, format='png', dpi=150); img.seek(0); plt.close(fig); return img
+    plt.tight_layout()
+    image_buffer = io.BytesIO()
+    plt.savefig(image_buffer, format='png', dpi=150); image_buffer.seek(0); plt.close(fig)
+    return image_buffer
 
 # ==========================================
 # 4. LOGIKA INTEGRASI KPRO (Google Sheet)
@@ -309,7 +331,7 @@ async def process_kpro_logic(raw_df):
     wib_tz = timezone(timedelta(hours=7)); today = datetime.now(wib_tz).date()
     yesterday = today - timedelta(days=1); seven_days = today - timedelta(days=6)
     
-    # Casting format waktu Pandas
+    # Casting format waktu agar tidak error saat dipindah ke string
     raw_df['DATECREATED'] = pd.to_datetime(raw_df['DATECREATED'], errors='coerce')
     raw_df['STATUSDATE'] = pd.to_datetime(raw_df['STATUSDATE'], errors='coerce')
     raw_df['TGL_MANJA'] = pd.to_datetime(raw_df['TGL_MANJA'], errors='coerce')
@@ -318,15 +340,12 @@ async def process_kpro_logic(raw_df):
         sh = client.open_by_key(KPRO_SHEET_ID)
         
         # ------------------------------------------------------------------
-        # PROSES 1: FAST UPSERT DATA MENTAH KE TAB "DATA KPRO"
+        # PROSES 1: UPSERT (UPDATE/INSERT) DATA MENTAH KE TAB "DATA KPRO"
         # ------------------------------------------------------------------
         try:
             ws_raw = sh.worksheet(KPRO_RAW_DATA_SHEET_NAME)
             
-            # A. Tarik Data Lama dari GSheet
-            existing_data = ws_raw.get_all_values()
-            
-            # B. Siapkan Data Baru (Ubah Tanggal jadi String)
+            # 1. Bersihkan Data File Excel yang baru di-upload (Hapus duplicate WONUM internal File)
             df_new = raw_df.copy()
             for col in df_new.select_dtypes(include=['datetime64', 'datetimetz']).columns:
                 df_new[col] = df_new[col].dt.strftime('%Y-%m-%d %H:%M:%S')
@@ -338,56 +357,76 @@ async def process_kpro_logic(raw_df):
                 df_new['WONUM'] = df_new['WONUM'].str.strip().str.upper()
                 df_new = df_new.drop_duplicates(subset=['WONUM'], keep='last')
             
+            # 2. Ambil data yang ADA di Google Sheet (Lama)
+            existing_data = ws_raw.get_all_values()
+            
             if not existing_data:
-                # Jika Sheet masih kosong melompong, langsung tulis
+                # Jika sheet benar-benar kosong, langsung tulis semua dari awal
                 data_to_upload =[df_new.columns.tolist()] + df_new.values.tolist()
-                try: ws_raw.update(range_name='A1', values=data_to_upload)
-                except: ws_raw.update('A1', data_to_upload)
-                msg.append(f"✅ Data disalin ke 'DATA KPRO' (Total: {len(df_new)} baris).")
+                try:
+                    ws_raw.update(range_name='A1', values=data_to_upload)
+                except TypeError:
+                    ws_raw.update('A1', data_to_upload)
+                msg.append(f"✅ Data awal ditulis ke 'DATA KPRO' (Total: {len(df_new)} baris).")
             else:
-                # C. Lakukan Upsert di Memory Pandas (SUPER CEPAT & AMAN DARI TIMEOUT)
+                # Jika sheet sudah ada datanya, kita cocokan menggunakan Header Kolom
                 headers = existing_data[0]
-                df_existing = pd.DataFrame(existing_data[1:], columns=headers)
                 
-                if 'WONUM' in df_existing.columns and 'WONUM' in df_new.columns:
-                    df_existing['WONUM'] = df_existing['WONUM'].astype(str).str.strip().str.upper()
-                    
-                    # Set Index untuk pencocokan update
-                    df_existing.set_index('WONUM', inplace=True)
-                    df_new_indexed = df_new.set_index('WONUM')
-                    
-                    # Update baris yang WONUM-nya sudah ada dengan data baru
-                    df_existing.update(df_new_indexed)
-                    
-                    # Reset index
-                    df_existing.reset_index(inplace=True)
-                    df_new_indexed.reset_index(inplace=True)
-                    
-                    # Cari WONUM yang benar-benar baru (belum ada di df_existing)
-                    existing_wonums = set(df_existing['WONUM'].tolist())
-                    new_rows = df_new_indexed[~df_new_indexed['WONUM'].isin(existing_wonums)]
-                    
-                    # Gabungkan data lama yang sudah di-update dengan data baru
-                    df_final = pd.concat([df_existing, new_rows], ignore_index=True)
-                    
-                    # Pastikan urutan Header konsisten dengan GSheet
-                    final_columns = headers + [c for c in df_final.columns if c not in headers]
-                    df_final = df_final[final_columns]
-                    df_final = df_final.fillna("")
-                    
-                    # Tulis kembali ke GSheet secara Bulk Overwrite (TIDAK Menghapus format/warna Sheet)
-                    data_to_upload = [df_final.columns.tolist()] + df_final.values.tolist()
-                    try:
-                        ws_raw.update(range_name='A1', values=data_to_upload)
-                    except:
-                        ws_raw.update('A1', data_to_upload)
-                        
-                    msg.append(f"✅ 'DATA KPRO' Diperbarui! (Terdapat update & {len(new_rows)} baris baru)")
-                else:
-                    # Kalau tidak ada WONUM sama sekali, sekedar ditaruh di bawahnya
+                # Cari Index kolom WONUM di Google Sheet
+                wonum_col_idx = -1
+                for i, h in enumerate(headers):
+                    if h.strip().upper() == 'WONUM':
+                        wonum_col_idx = i
+                        break
+                
+                if wonum_col_idx == -1 or 'WONUM' not in df_new.columns:
+                    # Gagal menemukan WONUM, langsung append semua ke paling bawah tanpa peduli duplikat
                     rows_to_append = df_new.values.tolist()
                     ws_raw.append_rows(rows_to_append)
-                    msg.append("⚠️ WONUM tidak ditemukan. Data otomatis disisipkan ke baris bawah.")
+                    msg.append("⚠️ Kolom WONUM tidak ditemukan. Data otomatis disisipkan ke baris terbawah tanpa filter.")
+                else:
+                    # Proses Matching untuk Upsert!
+                    # A. Petakan data lama: WONUM -> Berada di Row mana?
+                    existing_wonums = {}
+                    for row_idx, row_vals in enumerate(existing_data):
+                        if row_idx == 0: continue # Lewati header
+                        # Ambil nilai WONUM dari Sheet
+                        if wonum_col_idx < len(row_vals):
+                            w_val = str(row_vals[wonum_col_idx]).strip().upper()
+                            if w_val:
+                                # row_idx + 1 karena API Gspread memakai index mulai dari 1
+                                existing_wonums[w_val] = row_idx + 1
+                    
+                    cells_to_update =[]
+                    rows_to_append =[]
+                    
+                    # B. Iterasi data baru dan cocokan
+                    for _, row in df_new.iterrows():
+                        w_val = str(row.get('WONUM', '')).strip().upper()
+                        
+                        # Siapkan list isi baris dengan urutan yang SAMA PERSIS dengan format Header Sheet Google
+                        row_data =[]
+                        for h in headers:
+                            val = row.get(h, "")
+                            row_data.append(val)
+                            
+                        if w_val in existing_wonums:
+                            # 🎯 WONUM Sudah Ada -> Siapkan Update Cell Lama (TIDAK Menghapus Baris!)
+                            r_idx = existing_wonums[w_val]
+                            for c_idx, val in enumerate(row_data):
+                                cells_to_update.append(gspread.Cell(r_idx, c_idx + 1, str(val)))
+                        else:
+                            # 🚀 WONUM Belum Ada -> Siapkan sebagai Baris Baru di Bawah
+                            rows_to_append.append(row_data)
+                    
+                    # C. Eksekusi ekspor ke Google Sheet (Cepat & Menjaga Format)
+                    if cells_to_update:
+                        ws_raw.update_cells(cells_to_update, value_input_option='USER_ENTERED')
+                    
+                    if rows_to_append:
+                        ws_raw.append_rows(rows_to_append, value_input_option='USER_ENTERED')
+                        
+                    msg.append(f"✅ 'DATA KPRO' Diperbarui: {len(cells_to_update)//len(headers)} baris di-update, {len(rows_to_append)} baris baru ditambahkan.")
                     
         except Exception as raw_e:
             logger.error(f"Gagal upsert raw data: {raw_e}", exc_info=True)
@@ -428,7 +467,7 @@ async def process_kpro_logic(raw_df):
         # ------------------------------------------------------------------
         try:
             ws_micro = sh.worksheet(KPRO_MICRO_UPDATE_SHEET_NAME)
-            micro_updates =[]
+            micro_updates = []
             today_df = raw_df[raw_df['STATUSDATE'].dt.date == today]
             
             for sto, row in KPRO_MICRO_STO_ROW_MAP.items():
@@ -465,13 +504,13 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("❌ Format file harus Excel.")
         return
 
-    proc_msg = await update.message.reply_text("⏳ Memproses Data... \n_(Menganalisa dan menyingkronkan WONUM ke Spreadsheet)_", parse_mode="Markdown")
+    proc_msg = await update.message.reply_text("⏳ Memproses Data... \n_(Memperbarui duplikat di Sheet & Menyiapkan Laporan)_", parse_mode="Markdown")
     try:
         f = await context.bot.get_file(doc.file_id)
         f_bytes = io.BytesIO(); await f.download_to_memory(f_bytes); f_bytes.seek(0)
         df = pd.read_excel(f_bytes)
         
-        # Bersihkan string columns
+        # Bersihkan string columns (Termasuk WONUM agar validasi berjalan sempurna)
         cols =['STO', 'STATUS', 'ERRORCODE', 'SUBERRORCODE', 'SCORDERNO', 'WONUM']
         for c in cols: 
             if c in df.columns: df[c] = df[c].astype(str).str.upper().str.strip()
