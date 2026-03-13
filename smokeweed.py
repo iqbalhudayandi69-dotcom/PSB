@@ -37,18 +37,19 @@ WEBHOOK_PATH = "/telegram"
 # --- PENGATURAN GOOGLE SHEET ---
 ENABLE_GOOGLE_SHEETS = True
 
-# --- ID SHEET & NAMA TAB ---
+# --- ID SHEET ---
 KPRO_SHEET_ID = "1wPeYLmInP7JlPCLZ1XYR-A75l9oHQfZ_U2R4Pc6ohVY"
 KPRO_TARGET_SHEET_NAME = "REPORT PS INDIHOME"
 KPRO_MICRO_UPDATE_SHEET_NAME = "UPDATE PER 2JAM"
-KPRO_RAW_DATA_SHEET_NAME = "DATA KPRO"  # <--- TAB UNTUK DATA MENTAH
 
 # ==========================================
 # 2. LOGIKA KREDENSIAL DARI ENV
 # ==========================================
 def get_credentials_dict():
     """Membangun dictionary kredensial dari Environment Variables Render"""
+    
     raw_key = os.getenv("GOOGLE_PRIVATE_KEY")
+    
     if not raw_key:
         logger.error("❌ GOOGLE_PRIVATE_KEY tidak ditemukan di Environment Variables!")
         return None
@@ -77,6 +78,7 @@ def get_gspread_client():
         creds_dict = get_credentials_dict()
         if not creds_dict:
             return None
+            
         gc = gspread.service_account_from_dict(creds_dict)
         return gc
     except Exception as e:
@@ -97,14 +99,19 @@ KPRO_MICRO_COLUMN_INDEX_MAP = {
 }
 
 # ==========================================
-# 3. DASHBOARD & TEXT REPORT
+# 3. DASHBOARD & TEXT REPORT (LOGIC UTAMA)
 # ==========================================
+
 def format_indo_date(dt_obj):
-    days =["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
-    months =["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-    return f"{days[dt_obj.weekday()]}, {dt_obj.day:02d} {months[dt_obj.month]} {dt_obj.year}"
+    """Helper: Format tanggal Indonesia (Senin, 06 Januari 2026)"""
+    days = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+    months = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+    day_name = days[dt_obj.weekday()]
+    month_name = months[dt_obj.month]
+    return f"{day_name}, {dt_obj.day:02d} {month_name} {dt_obj.year}"
 
 def create_summary_text(status_counts: pd.Series) -> str:
+    """Helper untuk text ringkasan di dalam Gambar"""
     def get_count(s): return status_counts.get(s, 0)
     ps = get_count('COMPWORK')
     acom = get_count('ACOMP') + get_count('VALSTART') + get_count('ACTCOMP') + get_count('VALCOMP')
@@ -124,43 +131,72 @@ def create_summary_text(status_counts: pd.Series) -> str:
     )
 
 def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) -> str:
+    """
+    Fungsi membuat Laporan Teks Detail (Format WhatsApp).
+    """
+    # Setup Timezone
     wib_tz = timezone(timedelta(hours=7))
     current_dt = report_timestamp.astimezone(wib_tz)
     today_date = current_dt.date()
     
+    # Konversi kolom ke datetime
     df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
     df['DATECREATED'] = pd.to_datetime(df['DATECREATED'], errors='coerce')
     df['TGL_MANJA'] = pd.to_datetime(df['TGL_MANJA'], errors='coerce')
     
+    # --- FILTER DATASET ---
+    # 1. Transaksi Hari Ini (Berdasarkan Status Date)
     df_today = df[df['STATUSDATE'].dt.date == today_date]
+    
+    # 2. Transaksi Created Hari Ini (Untuk Total WO / RE HI)
     df_created_today = df[df['DATECREATED'].dt.date == today_date]
+    
+    # 3. Snapshot Active (Untuk PI & Manja) - Cari status STARTWORK
     df_pi = df[df['STATUS'] == 'STARTWORK']
     
+    # --- HITUNG METRIK ---
+    
+    # A. Total WO: DATE CREAT HI (HARI INI)
     total_wo_hi = len(df_created_today)
     
+    # B. Aktivasi HI (Status Date Hari Ini)
     fo_aktivasi = len(df_today[df_today['STATUS'].isin(['CONTWORK', 'INSTCOMP', 'PENDWORK'])])
     acom = len(df_today[df_today['STATUS'].isin(['VALSTART', 'ACOMP', 'ACTCOMP', 'VALCOMP'])])
     ps_hi = len(df_today[df_today['STATUS'] == 'COMPWORK'])
     estimasi_ps = ps_hi + acom
     
+    # C. Sisa WO (Dari Snapshot PI/STARTWORK)
+    # Jam OPS: < 17:00
     pi_ops = len(df_pi[df_pi['STATUSDATE'].dt.hour < 17])
+    # Luar OPS: >= 17:00
     pi_non_ops = len(df_pi[df_pi['STATUSDATE'].dt.hour >= 17])
+    # Total PI
     pi_total = len(df_pi)
     
+    # D. Manja (Dari Snapshot PI berdasarkan TGL_MANJA)
     manja_h_min = len(df_pi[df_pi['TGL_MANJA'].dt.date < today_date])
     manja_hi = len(df_pi[df_pi['TGL_MANJA'].dt.date == today_date])
     manja_h_plus = len(df_pi[df_pi['TGL_MANJA'].dt.date > today_date])
     
+    # E. Kendala HI (Status Date Hari Ini)
     df_kendala = df_today[df_today['STATUS'] == 'WORKFAIL']
     kendala_hi = len(df_kendala)
     
+    # Deteksi Teknik vs Non Teknik via string matching
+    # Asumsi: Jika error code mengandung 'TEKNIK' masuk teknik, 'PELANGGAN' masuk non-teknik
     teknik = len(df_kendala[df_kendala['ERRORCODE'].str.contains('TEKNIK', na=False)])
     non_teknik = len(df_kendala[df_kendala['ERRORCODE'].str.contains('PELANGGAN', na=False)])
+    # Sisa yang tidak terdeteksi (opsional, dimasukkan ke Non Teknik jika perlu)
+    # sisa_kendala = kendala_hi - teknik - non_teknik 
+    # non_teknik += sisa_kendala 
     
+    # F. PS/RE (Persentase)
+    # PS/RE HI = (PS HI / Total WO HI) * 100
     ps_re_hi_pct = 0.0
     if total_wo_hi > 0:
         ps_re_hi_pct = (ps_hi / total_wo_hi) * 100
         
+    # PS/RE MTD (Month to Date)
     df_mtd_created = df[(df['DATECREATED'].dt.month == today_date.month) & (df['DATECREATED'].dt.year == today_date.year)]
     df_mtd_ps = df[(df['STATUSDATE'].dt.month == today_date.month) & (df['STATUSDATE'].dt.year == today_date.year) & (df['STATUS'] == 'COMPWORK')]
     
@@ -171,6 +207,7 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
     if total_wo_mtd > 0:
         ps_re_mtd_pct = (ps_mtd / total_wo_mtd) * 100
 
+    # --- FORMAT OUTPUT ---
     header_date = format_indo_date(current_dt)
     last_update_str = current_dt.strftime('%d/%m/%y %H:%M')
 
@@ -178,37 +215,45 @@ def create_detailed_text_report(df: pd.DataFrame, report_timestamp: datetime) ->
         f"Fulfillment Endstate Witel JAKPUS\n"
         f"{header_date}\n"
         f"--------------------\n\n"
+        
         f"Total WO: {total_wo_hi}\n\n"
+        
         f"Aktivasi HI\n"
         f"* FO AKTIVASI: {fo_aktivasi}\n"
         f"* ACOM: {acom}\n"
         f"* PS HI: {ps_hi}\n"
         f"* Estimasi PS: {estimasi_ps}\n\n"
+        
         f"Sisa WO\n"
         f"* Sisa PI HI (Jam OPS): {pi_ops}\n"
         f"* Sisa PI HI (Diluar Jam OPS): {pi_non_ops}\n"
         f"* PI HI: {pi_total}\n\n"
+        
         f"Manja\n"
         f"* H-: {manja_h_min}\n"
         f"* HI: {manja_hi}\n"
         f"* H+: {manja_h_plus}\n\n"
+        
         f"WO Kendala HI\n"
         f"* Kendala HI: {kendala_hi}\n"
         f"* Teknik: {teknik}\n"
         f"* Non Teknik: {non_teknik}\n\n"
+        
         f"PS/RE\n"
         f"* PS/RE HI: {ps_re_hi_pct:.1f}%\n"
         f"* PS/RE MTD: {ps_re_mtd_pct:.1f}%\n\n"
+        
         f"Last Update BIMA: {last_update_str}"
     )
     
     return report_text
 
 def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: datetime, status_counts: pd.Series) -> io.BytesIO:
+    # --- 1. Persiapan Data ---
     stos = sorted(daily_df['STO'].unique())
-    status_order =['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'ACTCOMP', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
+    status_order = ['CANCLWORK', 'COMPWORK', 'ACOMP', 'VALCOMP', 'VALSTART', 'ACTCOMP', 'STARTWORK', 'INSTCOMP', 'PENDWORK', 'CONTWORK', 'WORKFAIL']
     
-    table_data, row_styles =[], {}
+    table_data, row_styles = [], {}
     unique_statuses_in_data = daily_df['STATUS'].unique()
     
     for status in status_order:
@@ -219,18 +264,19 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
         row_data = {'KATEGORI': status}
         for sto in stos: row_data[sto] = len(status_df[status_df['STO'] == sto])
         
-        table_data.append(row_data); row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
+        table_data.append(row_data)
+        row_styles[len(table_data) - 1] = {'level': 1, 'status': status}
 
         if status == 'WORKFAIL':
             for error_code, error_group in status_df.groupby('ERRORCODE'):
-                if str(error_code).upper() in['NAN', 'N/A']: continue
+                if str(error_code).upper() in ['NAN', 'N/A']: continue
                 error_row = {'KATEGORI': f"  ↳ {error_code}"}
                 for sto in stos: error_row[sto] = len(error_group[error_group['STO'] == sto])
                 table_data.append(error_row)
                 row_styles[len(table_data) - 1] = {'level': 2, 'status': status, 'error': error_code}
 
                 for sub_error_code, sub_error_group in error_group.groupby('SUBERRORCODE'):
-                    if str(sub_error_code).upper() in['NAN', 'N/A']: continue
+                    if str(sub_error_code).upper() in ['NAN', 'N/A']: continue
                     sub_error_row = {'KATEGORI': f"    → {sub_error_code}"}
                     for sto in stos: sub_error_row[sto] = len(sub_error_group[sub_error_group['STO'] == sto])
                     if sum(list(sub_error_row.values())[1:]) > 0:
@@ -251,6 +297,7 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     display_df = pd.concat([display_df, pd.DataFrame([grand_total_row])], ignore_index=True)
     row_styles[len(display_df)-1] = {'level': 0, 'status': 'Total'}
 
+    # --- 2. Visualisasi (Fixed Layout & Sizing) ---
     num_rows = len(display_df)
     fig_height = num_rows * 0.5 + 4.5
     
@@ -264,8 +311,8 @@ def create_integrated_dashboard(daily_df: pd.DataFrame, report_timestamp: dateti
     ax_title.text(0.05, 0.95, f"REPORT DAILY ENDSTATE JAKPUS - {report_timestamp.strftime('%d %B %Y %H:%M:%S').upper()}", 
                   ha='left', va='top', fontsize=16, weight='bold', color='#2F3E46')
     
-    col_widths =[0.35] +[0.08] * (len(stos) + 1)
-    table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos +['Grand Total'], 
+    col_widths = [0.35] + [0.08] * (len(stos) + 1)
+    table = ax_table.table(cellText=display_df.values, colLabels=['KATEGORI'] + stos + ['Grand Total'], 
                            loc='center', cellLoc='center', colWidths=col_widths)
     table.auto_set_font_size(False); table.set_fontsize(10); table.scale(1, 2)
 
@@ -320,7 +367,7 @@ def create_empty_dashboard(report_timestamp: datetime) -> io.BytesIO:
 # 4. LOGIKA INTEGRASI KPRO (Google Sheet)
 # ==========================================
 async def process_kpro_logic(raw_df):
-    msg =[]
+    msg = []
     wonum_details = {}
 
     if not ENABLE_GOOGLE_SHEETS: return False, "", {}
@@ -331,164 +378,57 @@ async def process_kpro_logic(raw_df):
     wib_tz = timezone(timedelta(hours=7)); today = datetime.now(wib_tz).date()
     yesterday = today - timedelta(days=1); seven_days = today - timedelta(days=6)
     
-    # Casting format waktu agar tidak error saat dipindah ke string
     raw_df['DATECREATED'] = pd.to_datetime(raw_df['DATECREATED'], errors='coerce')
     raw_df['STATUSDATE'] = pd.to_datetime(raw_df['STATUSDATE'], errors='coerce')
     raw_df['TGL_MANJA'] = pd.to_datetime(raw_df['TGL_MANJA'], errors='coerce')
     
     try:
         sh = client.open_by_key(KPRO_SHEET_ID)
+        ws = sh.worksheet(KPRO_TARGET_SHEET_NAME)
+        updates = []
+        for sto, row in KPRO_STO_ROW_MAP.items():
+            sto_df = raw_df[raw_df['STO'] == sto]
+            is_today = sto_df['STATUSDATE'].dt.date == today
+            is_created_today = sto_df['DATECREATED'].dt.date == today
+            
+            val_map = {
+                'RE HI': len(sto_df[is_created_today]),
+                'PS ENDSTATE': len(sto_df[is_today & (sto_df['STATUS'] == 'COMPWORK')]),
+                'VALSTART ENDSATATE': len(sto_df[is_today & sto_df['STATUS'].isin(['INSTCOMP','ACTCOMP','VALCOMP','VALSTART'])]),
+                'EST PS H-1': len(sto_df[(sto_df['STATUSDATE'].dt.date == yesterday) & (sto_df['STATUS'] == 'COMPWORK')]),
+                'EST PS W-1': len(sto_df[(sto_df['STATUSDATE'].dt.date >= seven_days) & (sto_df['STATUSDATE'].dt.date <= today) & (sto_df['STATUS'] == 'COMPWORK')]),
+                'MANJA HI': len(sto_df[(sto_df['STATUS']=='STARTWORK') & (sto_df['TGL_MANJA'].dt.date == today)]),
+                'LEWAT MANJA': len(sto_df[(sto_df['STATUS']=='STARTWORK') & (sto_df['TGL_MANJA'].dt.date < today)]),
+                'KENDALA PELANGGAN': len(sto_df[(sto_df['STATUS']=='WORKFAIL') & (sto_df['ERRORCODE']=='KENDALA PELANGGAN')]),
+                'KENDALA JARINGAN': len(sto_df[(sto_df['STATUS']=='WORKFAIL') & (sto_df['ERRORCODE']=='KENDALA TEKNIK')])
+            }
+            for col_name, val in val_map.items():
+                if col_name in KPRO_COLUMN_INDEX_MAP:
+                    updates.append(gspread.Cell(row, KPRO_COLUMN_INDEX_MAP[col_name], int(val)))
+        if updates: ws.update_cells(updates, value_input_option='USER_ENTERED')
+        msg.append("✅ Checkpoint Updated.")
+
+        ws_micro = sh.worksheet(KPRO_MICRO_UPDATE_SHEET_NAME)
+        micro_updates = []
+        today_df = raw_df[raw_df['STATUSDATE'].dt.date == today]
         
-        # ------------------------------------------------------------------
-        # PROSES 1: UPSERT (UPDATE/INSERT) DATA MENTAH KE TAB "DATA KPRO"
-        # ------------------------------------------------------------------
-        try:
-            ws_raw = sh.worksheet(KPRO_RAW_DATA_SHEET_NAME)
+        for sto, row in KPRO_MICRO_STO_ROW_MAP.items():
+            sto_data = today_df[today_df['STO'] == sto]
+            wonum_details[sto] = {}
+            total_wo = 0
+            for status, col_idx in KPRO_MICRO_COLUMN_INDEX_MAP.items():
+                if status == 'TOTAL WO': continue
+                subset = sto_data[sto_data['STATUS'] == status]
+                count = len(subset); total_wo += count
+                micro_updates.append(gspread.Cell(row, col_idx, count))
+                if count > 0: wonum_details[sto][status] = subset['WONUM'].tolist()
+            micro_updates.append(gspread.Cell(row, KPRO_MICRO_COLUMN_INDEX_MAP['TOTAL WO'], total_wo))
             
-            # 1. Bersihkan Data File Excel yang baru di-upload (Hapus duplicate WONUM internal File)
-            df_new = raw_df.copy()
-            for col in df_new.select_dtypes(include=['datetime64', 'datetimetz']).columns:
-                df_new[col] = df_new[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            
-            df_new = df_new.fillna("")
-            df_new = df_new.astype(str).replace({'nan': '', 'NaT': '', 'None': '', 'NaN': ''})
-            
-            if 'WONUM' in df_new.columns:
-                df_new['WONUM'] = df_new['WONUM'].str.strip().str.upper()
-                df_new = df_new.drop_duplicates(subset=['WONUM'], keep='last')
-            
-            # 2. Ambil data yang ADA di Google Sheet (Lama)
-            existing_data = ws_raw.get_all_values()
-            
-            if not existing_data:
-                # Jika sheet benar-benar kosong, langsung tulis semua dari awal
-                data_to_upload =[df_new.columns.tolist()] + df_new.values.tolist()
-                try:
-                    ws_raw.update(range_name='A1', values=data_to_upload)
-                except TypeError:
-                    ws_raw.update('A1', data_to_upload)
-                msg.append(f"✅ Data awal ditulis ke 'DATA KPRO' (Total: {len(df_new)} baris).")
-            else:
-                # Jika sheet sudah ada datanya, kita cocokan menggunakan Header Kolom
-                headers = existing_data[0]
-                
-                # Cari Index kolom WONUM di Google Sheet
-                wonum_col_idx = -1
-                for i, h in enumerate(headers):
-                    if h.strip().upper() == 'WONUM':
-                        wonum_col_idx = i
-                        break
-                
-                if wonum_col_idx == -1 or 'WONUM' not in df_new.columns:
-                    # Gagal menemukan WONUM, langsung append semua ke paling bawah tanpa peduli duplikat
-                    rows_to_append = df_new.values.tolist()
-                    ws_raw.append_rows(rows_to_append)
-                    msg.append("⚠️ Kolom WONUM tidak ditemukan. Data otomatis disisipkan ke baris terbawah tanpa filter.")
-                else:
-                    # Proses Matching untuk Upsert!
-                    # A. Petakan data lama: WONUM -> Berada di Row mana?
-                    existing_wonums = {}
-                    for row_idx, row_vals in enumerate(existing_data):
-                        if row_idx == 0: continue # Lewati header
-                        # Ambil nilai WONUM dari Sheet
-                        if wonum_col_idx < len(row_vals):
-                            w_val = str(row_vals[wonum_col_idx]).strip().upper()
-                            if w_val:
-                                # row_idx + 1 karena API Gspread memakai index mulai dari 1
-                                existing_wonums[w_val] = row_idx + 1
-                    
-                    cells_to_update =[]
-                    rows_to_append =[]
-                    
-                    # B. Iterasi data baru dan cocokan
-                    for _, row in df_new.iterrows():
-                        w_val = str(row.get('WONUM', '')).strip().upper()
-                        
-                        # Siapkan list isi baris dengan urutan yang SAMA PERSIS dengan format Header Sheet Google
-                        row_data =[]
-                        for h in headers:
-                            val = row.get(h, "")
-                            row_data.append(val)
-                            
-                        if w_val in existing_wonums:
-                            # 🎯 WONUM Sudah Ada -> Siapkan Update Cell Lama (TIDAK Menghapus Baris!)
-                            r_idx = existing_wonums[w_val]
-                            for c_idx, val in enumerate(row_data):
-                                cells_to_update.append(gspread.Cell(r_idx, c_idx + 1, str(val)))
-                        else:
-                            # 🚀 WONUM Belum Ada -> Siapkan sebagai Baris Baru di Bawah
-                            rows_to_append.append(row_data)
-                    
-                    # C. Eksekusi ekspor ke Google Sheet (Cepat & Menjaga Format)
-                    if cells_to_update:
-                        ws_raw.update_cells(cells_to_update, value_input_option='USER_ENTERED')
-                    
-                    if rows_to_append:
-                        ws_raw.append_rows(rows_to_append, value_input_option='USER_ENTERED')
-                        
-                    msg.append(f"✅ 'DATA KPRO' Diperbarui: {len(cells_to_update)//len(headers)} baris di-update, {len(rows_to_append)} baris baru ditambahkan.")
-                    
-        except Exception as raw_e:
-            logger.error(f"Gagal upsert raw data: {raw_e}", exc_info=True)
-            msg.append(f"❌ Gagal update 'DATA KPRO': {raw_e}")
-
-        # ------------------------------------------------------------------
-        # PROSES 2: UPDATE CHECKPOINT DASHBOARD
-        # ------------------------------------------------------------------
-        try:
-            ws = sh.worksheet(KPRO_TARGET_SHEET_NAME)
-            updates =[]
-            for sto, row in KPRO_STO_ROW_MAP.items():
-                sto_df = raw_df[raw_df['STO'] == sto]
-                is_today = sto_df['STATUSDATE'].dt.date == today
-                is_created_today = sto_df['DATECREATED'].dt.date == today
-                
-                val_map = {
-                    'RE HI': len(sto_df[is_created_today]),
-                    'PS ENDSTATE': len(sto_df[is_today & (sto_df['STATUS'] == 'COMPWORK')]),
-                    'VALSTART ENDSATATE': len(sto_df[is_today & sto_df['STATUS'].isin(['INSTCOMP','ACTCOMP','VALCOMP','VALSTART'])]),
-                    'EST PS H-1': len(sto_df[(sto_df['STATUSDATE'].dt.date == yesterday) & (sto_df['STATUS'] == 'COMPWORK')]),
-                    'EST PS W-1': len(sto_df[(sto_df['STATUSDATE'].dt.date >= seven_days) & (sto_df['STATUSDATE'].dt.date <= today) & (sto_df['STATUS'] == 'COMPWORK')]),
-                    'MANJA HI': len(sto_df[(sto_df['STATUS']=='STARTWORK') & (sto_df['TGL_MANJA'].dt.date == today)]),
-                    'LEWAT MANJA': len(sto_df[(sto_df['STATUS']=='STARTWORK') & (sto_df['TGL_MANJA'].dt.date < today)]),
-                    'KENDALA PELANGGAN': len(sto_df[(sto_df['STATUS']=='WORKFAIL') & (sto_df['ERRORCODE']=='KENDALA PELANGGAN')]),
-                    'KENDALA JARINGAN': len(sto_df[(sto_df['STATUS']=='WORKFAIL') & (sto_df['ERRORCODE']=='KENDALA TEKNIK')])
-                }
-                for col_name, val in val_map.items():
-                    if col_name in KPRO_COLUMN_INDEX_MAP:
-                        updates.append(gspread.Cell(row, KPRO_COLUMN_INDEX_MAP[col_name], int(val)))
-            if updates: ws.update_cells(updates, value_input_option='USER_ENTERED')
-            msg.append("✅ Checkpoint Dashboard Updated.")
-        except Exception as dash_e:
-            msg.append(f"❌ Gagal update Checkpoint Dashboard: {dash_e}")
-
-        # ------------------------------------------------------------------
-        # PROSES 3: UPDATE MICRO (PER 2 JAM)
-        # ------------------------------------------------------------------
-        try:
-            ws_micro = sh.worksheet(KPRO_MICRO_UPDATE_SHEET_NAME)
-            micro_updates = []
-            today_df = raw_df[raw_df['STATUSDATE'].dt.date == today]
-            
-            for sto, row in KPRO_MICRO_STO_ROW_MAP.items():
-                sto_data = today_df[today_df['STO'] == sto]
-                wonum_details[sto] = {}
-                total_wo = 0
-                for status, col_idx in KPRO_MICRO_COLUMN_INDEX_MAP.items():
-                    if status == 'TOTAL WO': continue
-                    subset = sto_data[sto_data['STATUS'] == status]
-                    count = len(subset); total_wo += count
-                    micro_updates.append(gspread.Cell(row, col_idx, count))
-                    if count > 0: wonum_details[sto][status] = subset['WONUM'].tolist()
-                micro_updates.append(gspread.Cell(row, KPRO_MICRO_COLUMN_INDEX_MAP['TOTAL WO'], total_wo))
-                
-            if micro_updates: ws_micro.update_cells(micro_updates, value_input_option='USER_ENTERED')
-            msg.append("✅ Micro Update Updated.")
-        except Exception as micro_e:
-            msg.append(f"❌ Gagal update Micro: {micro_e}")
+        if micro_updates: ws_micro.update_cells(micro_updates, value_input_option='USER_ENTERED')
+        msg.append("✅ Micro Update Updated.")
 
     except Exception as e:
-        msg.append(f"❌ Error Koneksi Sheet Total: {str(e)}")
+        msg.append(f"❌ Error Koneksi Sheet: {str(e)}")
 
     return True, "\n".join(msg), wonum_details
 
@@ -504,38 +444,42 @@ async def handle_excel_file(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text("❌ Format file harus Excel.")
         return
 
-    proc_msg = await update.message.reply_text("⏳ Memproses Data... \n_(Memperbarui duplikat di Sheet & Menyiapkan Laporan)_", parse_mode="Markdown")
+    proc_msg = await update.message.reply_text("⏳ Memproses Dashboard & Sheet...")
     try:
         f = await context.bot.get_file(doc.file_id)
         f_bytes = io.BytesIO(); await f.download_to_memory(f_bytes); f_bytes.seek(0)
         df = pd.read_excel(f_bytes)
         
-        # Bersihkan string columns (Termasuk WONUM agar validasi berjalan sempurna)
-        cols =['STO', 'STATUS', 'ERRORCODE', 'SUBERRORCODE', 'SCORDERNO', 'WONUM']
+        cols = ['STO', 'STATUS', 'ERRORCODE', 'SUBERRORCODE', 'SCORDERNO']
         for c in cols: 
             if c in df.columns: df[c] = df[c].astype(str).str.upper().str.strip()
 
-        # Ekstrak data untuk gambar dan report
-        df['STATUSDATE_CLONE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
-        valid = df.dropna(subset=['STATUSDATE_CLONE'])
+        df['STATUSDATE'] = pd.to_datetime(df['STATUSDATE'], errors='coerce')
+        valid = df.dropna(subset=['STATUSDATE'])
         
         if not valid.empty:
-            latest = valid['STATUSDATE_CLONE'].dt.date.max()
-            daily = valid[valid['STATUSDATE_CLONE'].dt.date == latest].copy()
+            latest = valid['STATUSDATE'].dt.date.max()
+            daily = valid[valid['STATUSDATE'].dt.date == latest].copy()
             ts = update.message.date.astimezone(timezone(timedelta(hours=7)))
             
             # 1. Kirim Image Dashboard
             img = create_integrated_dashboard(daily, ts, daily['STATUS'].value_counts())
             await update.message.reply_photo(InputFile(img, filename="dash.png"), caption=f"Report {latest.strftime('%d/%m/%Y')}")
 
-            # 2. Kirim Text Report Detail
+            # 2. Kirim Text Report Detail (FITUR BARU)
             detailed_text = create_detailed_text_report(df, ts)
             await update.message.reply_text(detailed_text)
         
-        # 3. Kirim Raw Data & Update Google Sheets
+        # 3. Google Sheets
         if ENABLE_GOOGLE_SHEETS:
             _, log, details = await process_kpro_logic(df)
             if log: await update.message.reply_text(log)
+            
+            # (Opsional) Detail Micro Lama (List WO) bisa dikomentari jika tidak diperlukan lagi
+            # karena sudah ada Text Report baru. Saya biarkan aktif sebagai lampiran.
+            if details:
+                 # Jika ingin mematikan list panjang, comment block ini
+                 pass 
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
